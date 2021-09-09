@@ -33,7 +33,7 @@ import dagmc_h5m_file_inspector as di
 
 di.get_materials_from_h5m("dagmc.h5m")
 
->>> ['mat:steel', 'mat:graveyard']
+>>> ['steel', 'graveyard']
 ```
 
 Finding the volume IDs with their materials present in a DAGMC h5m file.
@@ -43,7 +43,7 @@ import dagmc_h5m_file_inspector as di
 
 di.get_volumes_and_materials_from_h5m
 
->>> {1: 'mat:steel', 2: 'mat:graveyard'}
+>>> {1: 'steel', 2: 'graveyard'}
 ```
 
 # Aknowledgements
