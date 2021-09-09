@@ -3,6 +3,7 @@ import numpy as np
 import pymoab as mb
 from pymoab import core, types
 
+
 def load_moab_file(filename: str):
     """Loads a h5m into a Moab Core object and returns the object"""
     moab_core = core.Core()
@@ -37,41 +38,42 @@ def load_moab_file(filename: str):
 #     return sorted(list(ids))
 
 def get_groups(mbcore):
-  
-  category_tag = mbcore.tag_get_handle(mb.types.CATEGORY_TAG_NAME)
-  
-  group_category = np.array(["Group"])
-  
-  group_ents = mbcore.get_entities_by_type_and_tag(0, mb.types.MBENTITYSET, category_tag, group_category)
-  
-  return group_ents
 
-    
-def get_vol_mat_map(group_ents, mbcore):  
-  name_tag = mbcore.tag_get_handle(mb.types.NAME_TAG_NAME)
-  id_tag = mbcore.tag_get_handle(mb.types.GLOBAL_ID_TAG_NAME)
-  vol_mat = {}
+    category_tag = mbcore.tag_get_handle(mb.types.CATEGORY_TAG_NAME)
 
-  
-  for group_ent in group_ents:
+    group_category = np.array(["Group"])
 
-    group_name = mbcore.tag_get_data(name_tag, group_ent)[0][0]
-    # optionally confirm that this is a material!
+    group_ents = mbcore.get_entities_by_type_and_tag(
+        0, mb.types.MBENTITYSET, category_tag, group_category)
 
-    if group_name.startswith('mat:'):
+    return group_ents
 
-      print('group_ent',group_ent)
-      print('group_name',group_name)
 
-      vols = mbcore.get_entities_by_type(group_ent, mb.types.MBENTITYSET)
+def get_vol_mat_map(group_ents, mbcore):
+    name_tag = mbcore.tag_get_handle(mb.types.NAME_TAG_NAME)
+    id_tag = mbcore.tag_get_handle(mb.types.GLOBAL_ID_TAG_NAME)
+    vol_mat = {}
 
-      print('vols', vols)
+    for group_ent in group_ents:
 
-      for vol in vols:
-          id = mbcore.tag_get_data(id_tag, vol)[0][0]
-          vol_mat[id] = group_name
+        group_name = mbcore.tag_get_data(name_tag, group_ent)[0][0]
+        # optionally confirm that this is a material!
 
-  return vol_mat
+        if group_name.startswith('mat:'):
+
+            print('group_ent', group_ent)
+            print('group_name', group_name)
+
+            vols = mbcore.get_entities_by_type(group_ent, mb.types.MBENTITYSET)
+
+            print('vols', vols)
+
+            for vol in vols:
+                id = mbcore.tag_get_data(id_tag, vol)[0][0]
+                vol_mat[id] = group_name
+
+    return vol_mat
+
 
 def get_volumes_and_materials_from_h5m(filename):
     mbcore = load_moab_file(filename)
