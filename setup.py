@@ -26,5 +26,5 @@ setuptools.setup(
     install_requires=[
         # pymoab is required by is not available on pypi, however moab is on conda
         # "moab",
-     ],
+    ],
 )

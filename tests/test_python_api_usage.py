@@ -20,7 +20,8 @@ class TestApiUsage(unittest.TestCase):
         """Extracts the volume numbers and material ids from a dagmc file and
         checks the contents match the expected contents"""
 
-        dict_of_vol_and_mats = di.get_volumes_and_materials_from_h5m("tests/dagmc.h5m")
+        dict_of_vol_and_mats = di.get_volumes_and_materials_from_h5m(
+            "tests/dagmc.h5m")
 
         print(dict_of_vol_and_mats)
 
