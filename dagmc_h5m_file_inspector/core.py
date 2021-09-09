@@ -49,6 +49,7 @@ def get_volumes_from_h5m(filename: str) -> List[str]:
 
     return sorted(set(list(ids)))
 
+
 def get_groups(mbcore):
 
     category_tag = mbcore.tag_get_handle(mb.types.CATEGORY_TAG_NAME)
@@ -59,6 +60,7 @@ def get_groups(mbcore):
         0, mb.types.MBENTITYSET, category_tag, group_category)
 
     return group_ents
+
 
 def get_materials_from_h5m(filename: str) -> List[int]:
     """Reads in a DAGMC h5m file and uses PyMoab to find the material tags in
@@ -81,9 +83,9 @@ def get_materials_from_h5m(filename: str) -> List[int]:
         group_name = mbcore.tag_get_data(name_tag, group_ent)[0][0]
         if group_name.startswith('mat:'):
             materials_list.append(group_name)
-    
+
     return sorted(set(materials_list))
-    
+
 
 def get_vol_mat_map(group_ents, mbcore) -> dict:
     name_tag = mbcore.tag_get_handle(mb.types.NAME_TAG_NAME)

@@ -15,13 +15,15 @@ jobs:
   testing:
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/fusion-energy/paramak:dependencies
+      image: continuumio/miniconda3
     steps:
       - name: Checkout repository
         uses: actions/checkout@v2
       
       - name: install package
         run: |
+          conda install -c conda-forge moab
+          pip install pytest
           python setup.py install
 
       - name: Run test_utils
