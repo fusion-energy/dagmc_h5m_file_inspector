@@ -23,6 +23,7 @@ jobs:
       - name: install package
         run: |
           conda install -c conda-forge moab
+          pip install pytest
           python setup.py install
 
       - name: Run test_utils
