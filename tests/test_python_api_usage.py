@@ -21,26 +21,80 @@ class TestApiUsage(unittest.TestCase):
         checks the contents match the expected contents"""
 
         dict_of_vol_and_mats = di.get_volumes_and_materials_from_h5m(
-            "tests/dagmc.h5m")
-
-        print(dict_of_vol_and_mats)
+            "tests/fusion_example_for_openmc_using_paramak-0.0.1/dagmc.h5m"
+        )
 
         assert dict_of_vol_and_mats == {
-            1: "mat:pf_coil_mat",
-            2: "mat:pf_coil_mat",
-            3: "mat:pf_coil_mat",
-            4: "mat:pf_coil_mat",
-            5: "mat:pf_coil_case_mat",
-            6: "mat:pf_coil_case_mat",
-            7: "mat:pf_coil_case_mat",
-            8: "mat:pf_coil_case_mat",
-            9: "mat:inboard_tf_coils_mat",
-            10: "mat:center_column_shield_mat",
-            11: "mat:firstwall_mat",
-            12: "mat:blanket_mat",
-            13: "mat:blanket_rear_wall_mat",
-            14: "mat:divertor_mat",
-            15: "mat:divertor_mat",
-            16: "mat:tf_coil_mat",
-            17: "mat:graveyard",
+            1: "mat:tungsten",
+            6: "mat:tungsten",
+            7: "mat:tungsten",
+            2: "mat:steel",
+            3: "mat:steel",
+            8: "mat:steel",
+            9: "mat:steel",
+            10: "mat:steel",
+            17: "mat:steel",
+            18: "mat:steel",
+            19: "mat:steel",
+            20: "mat:steel",
+            4: "mat:flibe",
+            5: "mat:flibe",
+            11: "mat:copper",
+            12: "mat:copper",
+            13: "mat:copper",
+            14: "mat:copper",
+            15: "mat:copper",
+            16: "mat:copper",
+            21: "mat:graveyard",
+            22: "mat:Vacuum",
         }
+
+    def test_volume_extraction(self):
+        """Extracts the volume ids from a dagmc file and checks the contents
+        match the expected contents"""
+
+        dict_of_vol_and_mats = di.get_volumes_from_h5m(
+            "tests/fusion_example_for_openmc_using_paramak-0.0.1/dagmc.h5m"
+        )
+
+        assert dict_of_vol_and_mats == [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15,
+            16,
+            17,
+            18,
+            19,
+            20,
+            21,
+            22,
+        ]
+
+    def test_material_extraction(self):
+        """Extracts the materials tags from a dagmc file and checks the
+        contents match the expected contents"""
+
+        dict_of_vol_and_mats = di.get_materials_from_h5m(
+            "tests/fusion_example_for_openmc_using_paramak-0.0.1/dagmc.h5m"
+        )
+
+        assert dict_of_vol_and_mats == [
+            "mat:Vacuum",
+            "mat:copper",
+            "mat:flibe",
+            "mat:graveyard",
+            "mat:steel",
+            "mat:tungsten",
+        ]

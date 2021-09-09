@@ -127,3 +127,6 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+*.gz
+tests/fusion_example_for_openmc_using_paramak-0.0.1/
