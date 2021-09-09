@@ -46,3 +46,6 @@ di.get_volumes_and_materials_from_h5m
 >>> {1: 'mat:steel', 2: 'mat:graveyard'}
 ```
 
+# Aknowledgements
+
+This package is based on a [Python script](https://gist.github.com/gonuke/c36e327e399c7a685cd315c738121c9a) by @gonuke
