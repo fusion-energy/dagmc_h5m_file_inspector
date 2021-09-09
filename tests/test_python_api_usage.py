@@ -22,8 +22,7 @@ class TestApiUsage(unittest.TestCase):
 
         dict_of_vol_and_mats = di.get_volumes_and_materials_from_h5m(
             filename="tests/fusion_example_for_openmc_using_paramak-0.0.1/dagmc.h5m",
-            remove_prefix=False
-        )
+            remove_prefix=False)
 
         assert dict_of_vol_and_mats == {
             1: "mat:tungsten",
@@ -122,8 +121,7 @@ class TestApiUsage(unittest.TestCase):
 
         dict_of_vol_and_mats = di.get_materials_from_h5m(
             filename="tests/fusion_example_for_openmc_using_paramak-0.0.1/dagmc.h5m",
-            remove_prefix=False
-        )
+            remove_prefix=False)
 
         assert dict_of_vol_and_mats == [
             "mat:Vacuum",
