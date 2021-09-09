@@ -16,13 +16,13 @@ class TestApiUsage(unittest.TestCase):
         tar.extractall("tests")
         tar.close()
 
-    def test_volume_and_material_extraction(self):
+    def test_volume_and_material_extraction_without_stripped_prefix(self):
         """Extracts the volume numbers and material ids from a dagmc file and
         checks the contents match the expected contents"""
 
         dict_of_vol_and_mats = di.get_volumes_and_materials_from_h5m(
-            "tests/fusion_example_for_openmc_using_paramak-0.0.1/dagmc.h5m"
-        )
+            filename="tests/fusion_example_for_openmc_using_paramak-0.0.1/dagmc.h5m",
+            remove_prefix=False)
 
         assert dict_of_vol_and_mats == {
             1: "mat:tungsten",
@@ -47,6 +47,39 @@ class TestApiUsage(unittest.TestCase):
             16: "mat:copper",
             21: "mat:graveyard",
             22: "mat:Vacuum",
+        }
+
+    def test_volume_and_material_extraction_remove_prefix(self):
+        """Extracts the volume numbers and material ids from a dagmc file and
+        checks the contents match the expected contents"""
+
+        dict_of_vol_and_mats = di.get_volumes_and_materials_from_h5m(
+            "tests/fusion_example_for_openmc_using_paramak-0.0.1/dagmc.h5m"
+        )
+
+        assert dict_of_vol_and_mats == {
+            1: "tungsten",
+            6: "tungsten",
+            7: "tungsten",
+            2: "steel",
+            3: "steel",
+            8: "steel",
+            9: "steel",
+            10: "steel",
+            17: "steel",
+            18: "steel",
+            19: "steel",
+            20: "steel",
+            4: "flibe",
+            5: "flibe",
+            11: "copper",
+            12: "copper",
+            13: "copper",
+            14: "copper",
+            15: "copper",
+            16: "copper",
+            21: "graveyard",
+            22: "Vacuum",
         }
 
     def test_volume_extraction(self):
@@ -82,13 +115,13 @@ class TestApiUsage(unittest.TestCase):
             22,
         ]
 
-    def test_material_extraction(self):
+    def test_material_extraction_no_remove_prefix(self):
         """Extracts the materials tags from a dagmc file and checks the
         contents match the expected contents"""
 
         dict_of_vol_and_mats = di.get_materials_from_h5m(
-            "tests/fusion_example_for_openmc_using_paramak-0.0.1/dagmc.h5m"
-        )
+            filename="tests/fusion_example_for_openmc_using_paramak-0.0.1/dagmc.h5m",
+            remove_prefix=False)
 
         assert dict_of_vol_and_mats == [
             "mat:Vacuum",
@@ -97,4 +130,21 @@ class TestApiUsage(unittest.TestCase):
             "mat:graveyard",
             "mat:steel",
             "mat:tungsten",
+        ]
+
+    def test_material_extraction_remove_prefix(self):
+        """Extracts the materials tags from a dagmc file and checks the
+        contents match the expected contents"""
+
+        dict_of_vol_and_mats = di.get_materials_from_h5m(
+            "tests/fusion_example_for_openmc_using_paramak-0.0.1/dagmc.h5m"
+        )
+
+        assert dict_of_vol_and_mats == [
+            "Vacuum",
+            "copper",
+            "flibe",
+            "graveyard",
+            "steel",
+            "tungsten",
         ]
