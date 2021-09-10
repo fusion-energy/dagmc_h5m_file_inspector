@@ -148,3 +148,19 @@ class TestApiUsage(unittest.TestCase):
             "steel",
             "tungsten",
         ]
+
+    def test_fail_with_missing_input_files(self):
+        """Calls functions without necessary input files to check if error
+        handeling is working"""
+
+        def test_missing_file_error_handling():
+            """Attempts to get info when the h5m file does not exist which
+            should fail with a FileNotFoundError"""
+
+            di.get_volumes_and_materials_from_h5m(
+                filename="non_existant.h5m",
+            )
+
+        self.assertRaises(
+            FileNotFoundError,
+            test_missing_file_error_handling)
