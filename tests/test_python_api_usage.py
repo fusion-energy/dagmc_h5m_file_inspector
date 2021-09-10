@@ -149,7 +149,6 @@ class TestApiUsage(unittest.TestCase):
             "tungsten",
         ]
 
-
     def test_fail_with_missing_input_files(self):
         """Calls functions without necessary input files to check if error
         handeling is working"""
