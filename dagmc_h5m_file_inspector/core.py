@@ -1,4 +1,5 @@
 
+from pathlib import Path
 from typing import List, Optional
 
 import pymoab as mb
@@ -14,6 +15,10 @@ def load_moab_file(filename: str):
     Returns:
         A pymoab.core.Core()
     """
+
+    if not Path(filename).is_file():
+        msg = f"filename provided ({filename}) does not exist"
+        raise FileNotFoundError(msg)
 
     moab_core = core.Core()
     moab_core.load_file(filename)
