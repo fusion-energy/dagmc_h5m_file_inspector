@@ -50,7 +50,7 @@ def get_volumes_from_h5m(filename: str) -> List[str]:
 
             for vol in vols:
                 id = mbcore.tag_get_data(id_tag, vol)[0][0]
-                ids.append(id)
+                ids.append(id.item())
 
     return sorted(set(list(ids)))
 
@@ -114,7 +114,7 @@ def get_vol_mat_map(group_ents, mbcore, remove_prefix) -> dict:
             vols = mbcore.get_entities_by_type(group_ent, mb.types.MBENTITYSET)
 
             for vol in vols:
-                id = mbcore.tag_get_data(id_tag, vol)[0][0]
+                id = mbcore.tag_get_data(id_tag, vol)[0][0].item()
                 if remove_prefix:
                     vol_mat[id] = group_name[4:]
                 else:
