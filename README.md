@@ -50,21 +50,21 @@ di.get_volumes_and_materials_from_h5m
 
 The options for the command line tool can be obtained with ```inspect-dagmc-h5m-file --help```
 
-Finding the volume IDs present in a dagmc h5m file
+Print the volume IDs present in a dagmc h5m file to the terminal
 
 ```
 inspect-dagmc-h5m-file -i dagmc.h5m -v
 >>> Volume IDs =[1, 2]
 ```
 
-Finding the material tags present in a dagmc h5m file
+Print the material tags present in a dagmc h5m file to the terminal
 
 ```bash
 inspect-dagmc-h5m-file -i dagmc.h5m -m
 >>> Material tags =['steel', 'graveyard']
 ```
 
-Finding the volume IDs and materials present in a dagmc h5m file
+Print the volume IDs and materials present in a dagmc h5m file to the terminal
 
 ```bash
 inspect-dagmc-h5m-file -i dagmc.h5m -b
@@ -72,6 +72,14 @@ inspect-dagmc-h5m-file -i dagmc.h5m -b
      {   1: 'steel',
          2: 'graveyard'}
 ```
+
+Write the volume IDs and materials present in a dagmc h5m file to a txt file
+
+```bash
+inspect-dagmc-h5m-file -i dagmc.h5m -b -o output.txt
+>>> writing file output.txt
+```
+
 
 # Aknowledgements
 
