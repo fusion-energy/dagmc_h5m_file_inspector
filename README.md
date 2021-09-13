@@ -14,7 +14,7 @@ pip install dagmc-h5m-file-inspector
 ```
 
 
-# Usage
+# Python API Usage
 
 Finding the volume IDs in a DAGMC h5m file.
 
@@ -44,6 +44,33 @@ import dagmc_h5m_file_inspector as di
 di.get_volumes_and_materials_from_h5m
 
 >>> {1: 'steel', 2: 'graveyard'}
+```
+
+# Command line tool usage
+
+The options for the command line tool can be obtained with ```inspect-dagmc-h5m-file --help```
+
+Finding the volume IDs present in a dagmc h5m file
+
+```
+inspect-dagmc-h5m-file -i dagmc.h5m -v
+>>> Volume IDs =[1, 2]
+```
+
+Finding the material tags present in a dagmc h5m file
+
+```bash
+inspect-dagmc-h5m-file -i dagmc.h5m -m
+>>> Material tags =['steel', 'graveyard']
+```
+
+Finding the volume IDs and materials present in a dagmc h5m file
+
+```bash
+inspect-dagmc-h5m-file -i dagmc.h5m -b
+>>> Volume IDs and material tags=
+     {   1: 'steel',
+         2: 'graveyard'}
 ```
 
 # Aknowledgements

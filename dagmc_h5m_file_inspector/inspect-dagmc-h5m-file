@@ -53,7 +53,7 @@ if __name__ == '__main__':
 
     if args.materials:
         volumes = get_materials_from_h5m(filename = args.input)
-        print(f'\nVolume IDs ={volumes}')
+        print(f'\nMaterial tags ={volumes}')
 
     if args.both:
         both = get_volumes_and_materials_from_h5m(filename = args.input)
