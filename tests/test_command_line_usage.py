@@ -6,7 +6,15 @@ import subprocess
 import json
 
 class TestReactor(unittest.TestCase):
+    def setUp(self):
 
+        if not Path("tests/v0.0.1.tar.gz").is_file():
+            url = "https://github.com/Shimwell/fusion_example_for_openmc_using_paramak/archive/refs/tags/v0.0.1.tar.gz"
+            urllib.request.urlretrieve(url, "tests/v0.0.1.tar.gz")
+
+        tar = tarfile.open("tests/v0.0.1.tar.gz", "r:gz")
+        tar.extractall("tests")
+        tar.close()
 
     def test_volume_finding(self):
         """Tests command runs and produces an output files with the correct contents"""
