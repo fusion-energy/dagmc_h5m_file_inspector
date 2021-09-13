@@ -7,7 +7,6 @@ import urllib.request
 from pathlib import Path
 
 
-
 class TestReactor(unittest.TestCase):
     def setUp(self):
 
