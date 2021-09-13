@@ -13,6 +13,13 @@ setuptools.setup(
     long_description_content_type="text/markdown",
     url="https://github.com/fusion-energy/dagmc_h5m_file_inspector",
     packages=setuptools.find_packages(),
+    scripts=['dagmc_h5m_file_inspector/inspect-dagmc-h5m-file'],
+    package_data={
+        "dagmc_h5m_file_inspector": [
+            "README.md",
+            "LICENSE",
+        ]
+    },
     classifiers=[
         "Programming Language :: Python :: 3",
         "License :: OSI Approved :: MIT License",
