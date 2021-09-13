@@ -5,7 +5,7 @@ import subprocess
 import unittest
 import urllib.request
 from pathlib import Path
-
+import tarfile
 
 
 class TestReactor(unittest.TestCase):
