@@ -25,7 +25,7 @@ def load_moab_file(filename: str):
     return moab_core
 
 
-def get_volumes_from_h5m(filename: str) -> List[str]:
+def get_volumes_from_h5m(filename: str) -> List[int]:
     """Reads in a DAGMC h5m file and uses PyMoab to find the volume ids of the
     materials in the file.
 
@@ -70,7 +70,7 @@ def get_groups(mbcore):
 def get_materials_from_h5m(
     filename: str,
     remove_prefix: Optional[bool] = True
-) -> List[int]:
+) -> List[str]:
     """Reads in a DAGMC h5m file and uses PyMoab to find the material tags in
     the file.
 
