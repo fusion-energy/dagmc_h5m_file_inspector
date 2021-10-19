@@ -150,3 +150,14 @@ class TestApiUsage(unittest.TestCase):
             "steel",
             "tungsten",
         ]
+
+    def test_opperations_with_missing_h5m_files(self):
+        """Set a cell tally that is not accepted which should raise an
+        error"""
+        def missing_h5m_file_error_handling():
+
+            di.core.load_moab_file(
+                filename="dagmc.h5m",
+            )
+
+        self.assertRaises(FileNotFoundError, missing_h5m_file_error_handling)
