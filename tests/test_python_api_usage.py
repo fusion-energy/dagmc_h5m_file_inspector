@@ -2,6 +2,7 @@ import tarfile
 import unittest
 import urllib.request
 from pathlib import Path
+
 import dagmc_h5m_file_inspector as di
 
 
@@ -22,8 +23,7 @@ class TestApiUsage(unittest.TestCase):
 
         dict_of_vol_and_mats = di.get_volumes_and_materials_from_h5m(
             filename="tests/fusion_example_for_openmc_using_paramak-0.0.1/dagmc.h5m",
-            remove_prefix=False
-        )
+            remove_prefix=False)
 
         assert dict_of_vol_and_mats == {
             1: "mat:tungsten",
@@ -122,8 +122,7 @@ class TestApiUsage(unittest.TestCase):
 
         dict_of_vol_and_mats = di.get_materials_from_h5m(
             filename="tests/fusion_example_for_openmc_using_paramak-0.0.1/dagmc.h5m",
-            remove_prefix=False
-        )
+            remove_prefix=False)
 
         assert dict_of_vol_and_mats == [
             "mat:Vacuum",
@@ -151,6 +150,7 @@ class TestApiUsage(unittest.TestCase):
             "tungsten",
         ]
 
+<<<<<<< HEAD
     def test_opperations_with_missing_h5m_files(self):
         """Set a cell tally that is not accepted which should raise an
         error"""
@@ -161,3 +161,20 @@ class TestApiUsage(unittest.TestCase):
             )
 
         self.assertRaises(FileNotFoundError, missing_h5m_file_error_handling)
+=======
+    def test_fail_with_missing_input_files(self):
+        """Calls functions without necessary input files to check if error
+        handeling is working"""
+
+        def test_missing_file_error_handling():
+            """Attempts to get info when the h5m file does not exist which
+            should fail with a FileNotFoundError"""
+
+            di.get_volumes_and_materials_from_h5m(
+                filename="non_existant.h5m",
+            )
+
+        self.assertRaises(
+            FileNotFoundError,
+            test_missing_file_error_handling)
+>>>>>>> 48c3c19c824cbce566b71cb6f17d9356cddb766b

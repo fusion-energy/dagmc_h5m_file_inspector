@@ -16,15 +16,16 @@ def load_moab_file(filename: str):
         A pymoab.core.Core()
     """
 
-    if not Path(filename).exists():
-        raise FileNotFoundError(f"Filename {filename} not found.")
+    if not Path(filename).is_file():
+        msg = f"filename provided ({filename}) does not exist"
+        raise FileNotFoundError(msg)
 
     moab_core = core.Core()
     moab_core.load_file(filename)
     return moab_core
 
 
-def get_volumes_from_h5m(filename: str) -> List[str]:
+def get_volumes_from_h5m(filename: str) -> List[int]:
     """Reads in a DAGMC h5m file and uses PyMoab to find the volume ids of the
     materials in the file.
 
@@ -49,7 +50,7 @@ def get_volumes_from_h5m(filename: str) -> List[str]:
 
             for vol in vols:
                 id = mbcore.tag_get_data(id_tag, vol)[0][0]
-                ids.append(id)
+                ids.append(id.item())
 
     return sorted(set(list(ids)))
 
@@ -69,7 +70,7 @@ def get_groups(mbcore):
 def get_materials_from_h5m(
     filename: str,
     remove_prefix: Optional[bool] = True
-) -> List[int]:
+) -> List[str]:
     """Reads in a DAGMC h5m file and uses PyMoab to find the material tags in
     the file.
 
@@ -113,7 +114,7 @@ def get_vol_mat_map(group_ents, mbcore, remove_prefix) -> dict:
             vols = mbcore.get_entities_by_type(group_ent, mb.types.MBENTITYSET)
 
             for vol in vols:
-                id = mbcore.tag_get_data(id_tag, vol)[0][0]
+                id = mbcore.tag_get_data(id_tag, vol)[0][0].item()
                 if remove_prefix:
                     vol_mat[id] = group_name[4:]
                 else:

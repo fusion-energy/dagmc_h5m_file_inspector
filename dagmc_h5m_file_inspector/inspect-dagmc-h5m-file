@@ -1,0 +1,89 @@
+
+#!/usr/bin/python
+
+import argparse
+import json
+import pprint
+from pathlib import Path
+
+from dagmc_h5m_file_inspector import get_volumes_from_h5m, get_materials_from_h5m, get_volumes_and_materials_from_h5m
+
+
+if __name__ == '__main__':
+
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument(
+        '-i', '--input',
+        type=str,
+        help='The filename of the h5m file',
+        required=True
+    )
+
+    parser.add_argument(
+        '-v', '--volumes',
+        help='Returns volume ids from a h5m file',
+        required=False,
+        action='store_true'
+    )
+
+    parser.add_argument(
+        '-m', '--materials',
+        help='Returns materials tags from a h5m file',
+        required=False,
+        action='store_true'
+    )
+
+    parser.add_argument(
+        '-b', '--both',
+        help='Returns volume ids with materials tags from a h5m file',
+        required=False,
+        action='store_true'
+    )
+
+    parser.add_argument(
+        '-o', '--output',
+        type=str,
+        default='inspector_results.txt',
+        help='Returns volume ids with materials tags from a h5m file',
+        required=False,
+    )
+
+    args = parser.parse_args()
+
+    volumes = None
+    if args.volumes:
+        volumes = get_volumes_from_h5m(filename = args.input)
+        print(f'\nVolume IDs ={volumes}')
+
+    materials = None
+    if args.materials:
+        materials = get_materials_from_h5m(filename = args.input)
+        print(f'\nMaterial tags ={materials}')
+
+    both = None
+    if args.both:
+        both = get_volumes_and_materials_from_h5m(filename = args.input)
+        pp = pprint.PrettyPrinter(indent=4)
+        print('\nVolume IDs and material tags=')
+        pp.pprint(both)
+
+
+    if args.volumes == False and args.materials == False and args.both == False:
+        print(f'\nNo inspection of {args.input} carried out as outputs were not '
+              'specified. Output options include -v, --volume, -m, --materials'
+              ', -b, --both')
+    elif args.output:
+        with open(args.output, 'w') as output_file:
+            text_to_write = {}
+            if volumes is not None:
+                text_to_write['volumes']=volumes
+            if materials is not None:
+                text_to_write['materials']=materials
+            if both is not None:
+                text_to_write['both']=both
+            print(f'writing file {args.output}')
+            json.dump(text_to_write, output_file, indent=4)
+    
+
+    print(f'\n')
