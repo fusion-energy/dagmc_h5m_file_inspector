@@ -7,6 +7,9 @@ DAGMC h5m file.
 
 # Installation
 
+The dagmc-h5m-file-inspector package requires pymoab which can be installed
+alongside moab with a conda install command.
+
 ```bash
 conda install -c conda-forge moab
 
