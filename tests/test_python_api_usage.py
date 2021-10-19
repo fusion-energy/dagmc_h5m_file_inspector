@@ -150,18 +150,6 @@ class TestApiUsage(unittest.TestCase):
             "tungsten",
         ]
 
-<<<<<<< HEAD
-    def test_opperations_with_missing_h5m_files(self):
-        """Set a cell tally that is not accepted which should raise an
-        error"""
-        def missing_h5m_file_error_handling():
-
-            di.core.load_moab_file(
-                filename="dagmc.h5m",
-            )
-
-        self.assertRaises(FileNotFoundError, missing_h5m_file_error_handling)
-=======
     def test_fail_with_missing_input_files(self):
         """Calls functions without necessary input files to check if error
         handeling is working"""
@@ -177,4 +165,3 @@ class TestApiUsage(unittest.TestCase):
         self.assertRaises(
             FileNotFoundError,
             test_missing_file_error_handling)
->>>>>>> 48c3c19c824cbce566b71cb6f17d9356cddb766b
