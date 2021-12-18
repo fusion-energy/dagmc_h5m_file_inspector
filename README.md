@@ -53,7 +53,7 @@ Finding the volume IDs with their materials present in a DAGMC h5m file.
 ```python
 import dagmc_h5m_file_inspector as di
 
-di.get_volumes_and_materials_from_h5m
+di.get_volumes_and_materials_from_h5m("dagmc.h5m")
 
 >>> {1: 'steel', 2: 'graveyard'}
 ```
