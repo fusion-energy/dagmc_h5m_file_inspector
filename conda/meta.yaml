@@ -1,5 +1,5 @@
-{% set name = "stl_to_h5m" %}
-{% set version = "0.0.3" %}
+{% set name = "dagmc_h5m_file_inspector" %}
+{% set version = "0.3.0" %}
 
 package:
   name: "{{ name|lower }}"
@@ -23,7 +23,7 @@ requirements:
 
 test:
   imports:
-    - stl_to_h5m
+    - dagmc_h5m_file_inspector
   requires:
     - pytest
   # source_files:
@@ -34,13 +34,13 @@ test:
 
 
 about:
-  home: "https://github.com/fusion-energy/stl_to_h5m"
+  home: "https://github.com/fusion-energy/dagmc_h5m_file_inspector"
   license: MIT
   license_family: MIT
   license_file: LICENSE.txt
-  doc_url: https://github.com/fusion-energy/stl_to_h5m
-  dev_url: https://github.com/fusion-energy/stl_to_h5m
-  summary: stl_to_h5m - Converts STL files to a DAGMC h5m file using PyMoab
+  doc_url: https://github.com/fusion-energy/dagmc_h5m_file_inspector
+  dev_url: https://github.com/fusion-energy/dagmc_h5m_file_inspector
+  summary: Extracts information from DAGMC h5m files including volumes number, material tags
 
 extra:
   recipe-maintainers:
