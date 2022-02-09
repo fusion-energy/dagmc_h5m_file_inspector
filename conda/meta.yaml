@@ -1,0 +1,47 @@
+{% set name = "dagmc_h5m_file_inspector" %}
+{% set version = "0.3.0" %}
+
+package:
+  name: "{{ name|lower }}"
+  version: {{ version }}
+
+source:
+  path: ..
+
+build:
+  number: 0
+  script: python setup.py install --single-version-externally-managed --record=record.txt
+
+requirements:
+  build:
+    - python {{ python }}
+    - setuptools
+  run:
+    - python
+    - moab
+    - numpy
+
+test:
+  imports:
+    - dagmc_h5m_file_inspector
+  requires:
+    - pytest
+  # source_files:
+  #   - tests/
+  #   - examples/
+  # commands:
+  #   - pytest tests
+
+
+about:
+  home: "https://github.com/fusion-energy/dagmc_h5m_file_inspector"
+  license: MIT
+  license_family: MIT
+  license_file: LICENSE.txt
+  doc_url: https://github.com/fusion-energy/dagmc_h5m_file_inspector
+  dev_url: https://github.com/fusion-energy/dagmc_h5m_file_inspector
+  summary: Extracts information from DAGMC h5m files including volumes number, material tags
+
+extra:
+  recipe-maintainers:
+    - shimwell

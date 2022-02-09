@@ -1,4 +1,3 @@
-
 from pathlib import Path
 from typing import List, Optional
 
@@ -45,7 +44,7 @@ def get_volumes_from_h5m(filename: str) -> List[int]:
 
     for group_ent in group_ents:
         group_name = mbcore.tag_get_data(name_tag, group_ent)[0][0]
-        if group_name.startswith('mat:'):
+        if group_name.startswith("mat:"):
             vols = mbcore.get_entities_by_type(group_ent, mb.types.MBENTITYSET)
 
             for vol in vols:
@@ -62,14 +61,14 @@ def get_groups(mbcore):
     group_category = ["Group"]
 
     group_ents = mbcore.get_entities_by_type_and_tag(
-        0, mb.types.MBENTITYSET, category_tag, group_category)
+        0, mb.types.MBENTITYSET, category_tag, group_category
+    )
 
     return group_ents
 
 
 def get_materials_from_h5m(
-    filename: str,
-    remove_prefix: Optional[bool] = True
+    filename: str, remove_prefix: Optional[bool] = True
 ) -> List[str]:
     """Reads in a DAGMC h5m file and uses PyMoab to find the material tags in
     the file.
@@ -90,7 +89,7 @@ def get_materials_from_h5m(
     for group_ent in group_ents:
 
         group_name = mbcore.tag_get_data(name_tag, group_ent)[0][0]
-        if group_name.startswith('mat:'):
+        if group_name.startswith("mat:"):
             if remove_prefix:
                 materials_list.append(group_name[4:])
             else:
@@ -109,7 +108,7 @@ def get_vol_mat_map(group_ents, mbcore, remove_prefix) -> dict:
         group_name = mbcore.tag_get_data(name_tag, group_ent)[0][0]
         # optionally confirm that this is a material!
 
-        if group_name.startswith('mat:'):
+        if group_name.startswith("mat:"):
 
             vols = mbcore.get_entities_by_type(group_ent, mb.types.MBENTITYSET)
 
@@ -124,8 +123,7 @@ def get_vol_mat_map(group_ents, mbcore, remove_prefix) -> dict:
 
 
 def get_volumes_and_materials_from_h5m(
-    filename: str,
-    remove_prefix: Optional[bool] = True
+    filename: str, remove_prefix: Optional[bool] = True
 ) -> dict:
     """Reads in a DAGMC h5m file and uses PyMoab to find the volume ids with
     their associated material tags.
