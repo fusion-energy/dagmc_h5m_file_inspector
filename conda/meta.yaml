@@ -1,9 +1,8 @@
 {% set name = "dagmc_h5m_file_inspector" %}
-{% set version = "0.3.0" %}
 
 package:
   name: "{{ name|lower }}"
-  version: {{ version }}
+  version: {{ GIT_DESCRIBE_TAG }}
 
 source:
   path: ..
