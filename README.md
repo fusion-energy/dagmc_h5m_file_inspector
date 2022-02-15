@@ -14,10 +14,20 @@ A minimal Python package that finds the volume ids and the material tags in a
 DAGMC h5m file.
 
 
-# Installation
+# Installation (Conda)
+
+The dagmc-h5m-file-inspector package can be installed with a single conda
+install terminal command.
+
+```bash
+conda install -c fusion-energy -c conda-forge dagmc_h5m_file_inspector
+```
+
+# Installation (Conda + Pip)
 
 The dagmc-h5m-file-inspector package requires pymoab which can be installed
-alongside moab with a conda install command.
+alongside Moab with a conda install command. Moab is not avialable on pip,
+however it can be installed with Conda.
 
 ```bash
 conda install -c conda-forge moab
