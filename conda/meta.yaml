@@ -25,11 +25,10 @@ test:
     - dagmc_h5m_file_inspector
   requires:
     - pytest
-  # source_files:
-  #   - tests/
-  #   - examples/
-  # commands:
-  #   - pytest tests
+  source_files:
+    - tests/
+  commands:
+    - pytest tests
 
 
 about:

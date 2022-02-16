@@ -8,16 +8,22 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    # This container includes libgl1-mesa-glx, anaconda-client and conda-build
+    # https://github.com/shimwell/miniconda3_docker_image/blob/main/Dockerfile
+    container: ghcr.io/shimwell/miniconda
+
     steps:
-    - uses: actions/checkout@v1
-    - name: publish-to-conda
-      uses: shimwell/anaconda-publish@main
-      with:
-        subDir: 'conda'
-        channels: '-c fusion-energy -c conda-forge'
-        AnacondaToken: ${{ secrets.ANACONDA_TOKEN }}
-        publish: true
-        test_all: true
-        # Currently there is no conda install for moab on windows
-        # convert_win: true
-        convert_osx: true
+      - uses: actions/checkout@v2
+
+      - name: Set up conda
+        run: |
+            conda config --set anaconda_upload no
+      - name: Build and publish to conda
+        env:
+          ANACONDA_API_TOKEN: ${{ secrets.ANACONDA_TOKEN }}
+        run: |
+            conda build conda -c conda-forge --config-file conda/conda_build_config.yaml
+            conda convert /opt/conda/conda-bld/linux-64/*.tar.bz2 --platform osx-64
+            anaconda upload -f /opt/conda/conda-bld/*/*.tar.bz2
+
+# note there is no windows convert as moab is a dependency
