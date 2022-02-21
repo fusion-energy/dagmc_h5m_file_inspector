@@ -20,7 +20,7 @@ The dagmc-h5m-file-inspector package can be installed with a single conda
 install terminal command.
 
 ```bash
-conda install -c fusion-energy -c conda-forge dagmc_h5m_file_inspector
+conda install -c fusion-energy -c fusion-energy -c conda-forge dagmc_h5m_file_inspector
 ```
 
 # Installation (Conda + Pip)
