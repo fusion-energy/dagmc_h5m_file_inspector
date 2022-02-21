@@ -16,7 +16,7 @@ requirements:
     - python {{ python }}
     - setuptools
   run:
-    - python
+    - python {{ python }}
     - moab
     - numpy
 
