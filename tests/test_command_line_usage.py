@@ -8,13 +8,10 @@ import tarfile
 
 
 class TestReactor(unittest.TestCase):
-
     def test_volume_finding(self):
         """Tests command runs and produces an output files with the correct contents"""
         os.system("rm vols.json")
-        os.system(
-            "inspect-dagmc-h5m-file -i tests/dagmc.h5m -v -o vols.json"
-        )
+        os.system("inspect-dagmc-h5m-file -i tests/dagmc.h5m -v -o vols.json")
         # assert Path("vols.json").is_file()
         with open("vols.json") as jsonFile:
             jsonObject = json.load(jsonFile)

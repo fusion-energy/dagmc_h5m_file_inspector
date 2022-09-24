@@ -69,7 +69,7 @@ def get_groups(mbcore):
 
 def get_materials_from_h5m(
     filename: str, remove_prefix: Optional[bool] = True
-):# -> List[str]:
+):  # -> List[str]:
     """Reads in a DAGMC h5m file and uses PyMoab to find the material tags in
     the file.
 
@@ -81,25 +81,25 @@ def get_materials_from_h5m(
         A list of material tags
     """
 
-
     import h5py
     import numpy as np
+
     dagmc_file_contents = h5py.File(filename)
-    material_group=dagmc_file_contents['/tstt/tags/NAME']
-    material_tags_hex=material_group.get('values')
-    material_tags_ascii=[]
+    material_group = dagmc_file_contents["/tstt/tags/NAME"]
+    material_tags_hex = material_group.get("values")
+    material_tags_ascii = []
     for tag in material_tags_hex:
-        raw_tag_in_hex=  np.array2string(tag)
+        raw_tag_in_hex = np.array2string(tag)
         print(raw_tag_in_hex)
-        tag_in_hex=raw_tag_in_hex.replace("\\x00", '')
+        tag_in_hex = raw_tag_in_hex.replace("\\x00", "")
         print(tag_in_hex)
-        tag_in_hex=tag_in_hex.replace("\\x", '')
-        tag_in_hex =tag_in_hex.lstrip("b'")
-        tag_in_hex =tag_in_hex.rstrip("'")
+        tag_in_hex = tag_in_hex.replace("\\x", "")
+        tag_in_hex = tag_in_hex.lstrip("b'")
+        tag_in_hex = tag_in_hex.rstrip("'")
         print(tag_in_hex)
         tag_in_asci = bytes.fromhex(tag_in_hex)
         print(tag_in_asci)
-        material_tags_ascii.append(tag_in_asci.decode())        
+        material_tags_ascii.append(tag_in_asci.decode())
 
     return sorted(set(material_tags_ascii))
 
