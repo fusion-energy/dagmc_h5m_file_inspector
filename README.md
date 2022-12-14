@@ -35,6 +35,12 @@ The dagmc-h5m-file-inspector package requires pymoab which can be installed
 alongside Moab with a conda install command. Moab is not avialable on pip,
 however it can be installed with Conda.
 
+Create a new conda environment and activate it
+```bash
+conda create --name new_env python=3.9
+conda activate new_env
+```
+Then install Moab and dagmc-h5m-file-inspector 
 ```bash
 conda install -c conda-forge moab
 
