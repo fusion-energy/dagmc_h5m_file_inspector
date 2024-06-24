@@ -4,7 +4,6 @@
 import argparse
 import json
 import pprint
-from pathlib import Path
 
 from dagmc_h5m_file_inspector import get_volumes_from_h5m, get_materials_from_h5m, get_volumes_and_materials_from_h5m
 

@@ -132,6 +132,7 @@ dmypy.json
 tests/fusion_example_for_openmc_using_paramak-0.0.1/
 *.h5m
 *.json
+*.vtk
 
 # python version file
 _version.py

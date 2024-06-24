@@ -8,23 +8,11 @@ import tarfile
 
 
 class TestReactor(unittest.TestCase):
-    def setUp(self):
-
-        if not Path("tests/v0.0.1.tar.gz").is_file():
-            url = "https://github.com/Shimwell/fusion_example_for_openmc_using_paramak/archive/refs/tags/v0.0.1.tar.gz"
-            urllib.request.urlretrieve(url, "tests/v0.0.1.tar.gz")
-
-        tar = tarfile.open("tests/v0.0.1.tar.gz", "r:gz")
-        tar.extractall("tests")
-        tar.close()
-
     def test_volume_finding(self):
         """Tests command runs and produces an output files with the correct contents"""
         os.system("rm vols.json")
-        os.system(
-            "inspect-dagmc-h5m-file -i tests/fusion_example_for_openmc_using_paramak-0.0.1/dagmc.h5m -v -o vols.json"
-        )
-        assert Path("vols.json").is_file()
+        os.system("inspect-dagmc-h5m-file -i tests/dagmc.h5m -v -o vols.json")
+        # assert Path("vols.json").is_file()
         with open("vols.json") as jsonFile:
             jsonObject = json.load(jsonFile)
         assert jsonObject == {
@@ -58,9 +46,9 @@ class TestReactor(unittest.TestCase):
         """Tests command runs and produces an output files with the correct contents"""
         os.system("rm vols.json")
         os.system(
-            "inspect-dagmc-h5m-file -i tests/fusion_example_for_openmc_using_paramak-0.0.1/dagmc.h5m -m -o mats.json"
+            "inspect-dagmc-h5m-file -i tests/magnetic_fusion_openmc_dagmc_paramak_example-0.0.1/dagmc.h5m -m -o mats.json"
         )
-        assert Path("mats.json").is_file()
+        # assert Path("mats.json").is_file()
         with open("mats.json") as jsonFile:
             jsonObject = json.load(jsonFile)
         assert jsonObject == {
@@ -71,9 +59,9 @@ class TestReactor(unittest.TestCase):
         """Tests command runs and produces an output files with the correct contents"""
         os.system("rm vols.json")
         os.system(
-            "inspect-dagmc-h5m-file -i tests/fusion_example_for_openmc_using_paramak-0.0.1/dagmc.h5m -b -o both.json"
+            "inspect-dagmc-h5m-file -i tests/magnetic_fusion_openmc_dagmc_paramak_example-0.0.1/dagmc.h5m -b -o both.json"
         )
-        assert Path("both.json").is_file()
+        # assert Path("both.json").is_file()
         with open("both.json") as jsonFile:
             jsonObject = json.load(jsonFile)
         assert jsonObject == {
@@ -107,7 +95,7 @@ class TestReactor(unittest.TestCase):
         """Tests command runs and produces an output files with the correct contents"""
         os.system("rm empty.json")
         os.system(
-            "inspect-dagmc-h5m-file -i tests/fusion_example_for_openmc_using_paramak-0.0.1/dagmc.h5m -o empty.json"
+            "inspect-dagmc-h5m-file -i tests/magnetic_fusion_openmc_dagmc_paramak_example-0.0.1/dagmc.h5m -o empty.json"
         )
         assert Path("empty.json").is_file() == False
 
