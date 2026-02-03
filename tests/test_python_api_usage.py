@@ -476,3 +476,139 @@ def test_set_openmc_material_volumes_with_none_names(touching_boxes, backend):
 
     # Unnamed material should remain unchanged
     assert unnamed_mat.volume is None
+
+
+# ============================================================================
+# Tests comparing volume calculations with pydagmc and OpenMC stochastic
+# ============================================================================
+
+
+@pytest.mark.parametrize("filename", H5M_TEST_FILES)
+def test_volume_sizes_pydagmc_consistency(filename):
+    """Verify our volume calculations match pydagmc results"""
+    import warnings
+    import pydagmc
+
+    # Get volumes from our implementations
+    h5py_volumes = di.get_volumes_sizes_from_h5m_by_cell_id(filename, backend="h5py")
+
+    # Get volumes from pydagmc
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        dag_model = pydagmc.Model(filename)
+
+    pydagmc_volumes = {
+        int(vol_id): float(vol.volume)
+        for vol_id, vol in dag_model.volumes_by_id.items()
+    }
+
+    # Check same volume IDs are returned
+    assert set(h5py_volumes.keys()) == set(pydagmc_volumes.keys()), \
+        f"Volume IDs differ: h5py={set(h5py_volumes.keys())}, pydagmc={set(pydagmc_volumes.keys())}"
+
+    # Check volumes match within tolerance
+    for vol_id in h5py_volumes:
+        h5py_vol = h5py_volumes[vol_id]
+        pydagmc_vol = pydagmc_volumes[vol_id]
+
+        # Use relative tolerance for non-zero volumes
+        if pydagmc_vol > 1e-10:
+            rel_diff = abs(h5py_vol - pydagmc_vol) / pydagmc_vol
+            assert rel_diff < 0.01, \
+                f"Volume {vol_id} differs: h5py={h5py_vol}, pydagmc={pydagmc_vol}, rel_diff={rel_diff}"
+        else:
+            # For near-zero volumes, use absolute tolerance
+            assert abs(h5py_vol - pydagmc_vol) < 1e-6, \
+                f"Volume {vol_id} differs: h5py={h5py_vol}, pydagmc={pydagmc_vol}"
+
+
+# Subset of files for OpenMC stochastic tests (faster execution)
+H5M_TEST_FILES_OPENMC_STOCHASTIC = [
+    "tests/cuboid.h5m",
+    "tests/sphere.h5m",
+    "tests/nestedsphere.h5m",
+    "tests/cylinder.h5m",
+]
+
+
+@pytest.mark.parametrize("filename", H5M_TEST_FILES_OPENMC_STOCHASTIC)
+def test_volume_sizes_openmc_stochastic_consistency(filename, tmp_path):
+    """Verify our volume calculations match OpenMC stochastic results.
+
+    OpenMC uses Monte Carlo sampling to estimate volumes, so we allow
+    a larger tolerance (5%) to account for statistical noise.
+    """
+    import os
+    from pathlib import Path
+
+    # Convert to absolute path before changing directories
+    abs_filename = str(Path(filename).resolve())
+
+    # Get volumes and materials from our implementation
+    h5py_volumes = di.get_volumes_sizes_from_h5m_by_cell_id(abs_filename, backend="h5py")
+    lower, upper = di.get_bounding_box_from_h5m(abs_filename)
+    materials_list = di.get_materials_from_h5m(abs_filename, remove_prefix=True)
+
+    # Create OpenMC materials matching the DAGMC file
+    openmc_mats = []
+    for mat_name in materials_list:
+        mat = openmc.Material(name=mat_name)
+        mat.add_nuclide('H1', 1.0)
+        mat.set_density('g/cm3', 1.0)
+        openmc_mats.append(mat)
+    materials = openmc.Materials(openmc_mats)
+
+    # Create DAGMC universe and geometry
+    dagmc_univ = openmc.DAGMCUniverse(abs_filename, auto_geom_ids=True)
+    bounded_univ = dagmc_univ.bounded_universe()
+    geometry = openmc.Geometry(bounded_univ)
+
+    # Settings for volume calculation
+    settings = openmc.Settings()
+    settings.run_mode = 'volume'
+
+    # Create volume calculation for all materials
+    vol_calc = openmc.VolumeCalculation(
+        domains=openmc_mats,
+        samples=50000,
+        lower_left=lower.tolist(),
+        upper_right=upper.tolist()
+    )
+    settings.volume_calculations = [vol_calc]
+
+    # Build and run model
+    model = openmc.Model(geometry=geometry, materials=materials, settings=settings)
+
+    # Change to temp directory to avoid polluting the test directory
+    original_dir = os.getcwd()
+    os.chdir(tmp_path)
+    try:
+        model.run(output=False)
+
+        # Read results
+        results = openmc.VolumeCalculation.from_hdf5('volume_1.h5')
+
+        # Get OpenMC volumes by material name
+        openmc_volumes_by_mat = {}
+        for domain, vol in results.volumes.items():
+            # domain is the material ID
+            for mat in openmc_mats:
+                if mat.id == domain:
+                    openmc_volumes_by_mat[mat.name] = vol.nominal_value
+                    break
+
+        # Get our volumes by material name for comparison
+        h5py_volumes_by_mat = di.get_volumes_sizes_from_h5m_by_material_name(abs_filename, backend="h5py")
+
+        # Compare volumes (allow 5% tolerance for stochastic noise)
+        for mat_name in h5py_volumes_by_mat:
+            if mat_name in openmc_volumes_by_mat:
+                h5py_vol = h5py_volumes_by_mat[mat_name]
+                openmc_vol = openmc_volumes_by_mat[mat_name]
+
+                if openmc_vol > 1e-10:
+                    rel_diff = abs(h5py_vol - openmc_vol) / openmc_vol
+                    assert rel_diff < 0.05, \
+                        f"Material '{mat_name}' volume differs: h5py={h5py_vol}, openmc={openmc_vol}, rel_diff={rel_diff}"
+    finally:
+        os.chdir(original_dir)
