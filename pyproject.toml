@@ -1,10 +1,52 @@
 [build-system]
-requires = [
-    "setuptools >= 45",
-    "wheel",
-    "setuptools_scm[toml] >= 6.2",
-]
+requires = ["setuptools >= 61.0", "setuptools_scm[toml] >= 6.2"]
 build-backend = "setuptools.build_meta"
 
+[project]
+name = "dagmc_h5m_file_inspector"
+dynamic = ["version"]
+description = "Extracts information from DAGMC h5m files including volumes number, material tags"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.8"
+authors = [
+    { name = "The dagmc_h5m_file_inspector Development Team", email = "mail@jshimwell.com" },
+]
+classifiers = [
+    "Natural Language :: English",
+    "Topic :: Scientific/Engineering",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+
+[project.urls]
+Homepage = "https://github.com/fusion-energy/dagmc_h5m_file_inspector"
+Source = "https://github.com/fusion-energy/dagmc_h5m_file_inspector"
+Tracker = "https://github.com/fusion-energy/dagmc_h5m_file_inspector/issues"
+
+[project.scripts]
+inspect-dagmc-h5m-file = "dagmc_h5m_file_inspector.cli:main"
+
+[project.optional-dependencies]
+tests = [
+    "pytest >= 5.4.3",
+    "requests",
+    "pytest-cov",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
 [tool.setuptools_scm]
-write_to = "dagmc_h5m_file_inspector/_version.py"
+write_to = "src/dagmc_h5m_file_inspector/_version.py"
+
+[tool.flake8]
+per-file-ignores = ["__init__.py:F401"]
