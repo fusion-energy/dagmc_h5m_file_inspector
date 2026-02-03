@@ -238,29 +238,58 @@ def test_separated_volume_sizes_by_material_name(separated_boxes, backend):
 # Tests for h5py and pymoab backend consistency
 # ============================================================================
 
-# Files where h5py and pymoab produce consistent results
-H5M_TEST_FILES_CONSISTENT = [
+# All h5m test files
+H5M_TEST_FILES = [
     "tests/circulartorus.h5m",
     "tests/cuboid.h5m",
     "tests/cylinder.h5m",
     "tests/ellipticaltorus.h5m",
     "tests/nestedcylinder.h5m",
-    "tests/sphere.h5m",
-    "tests/tetrahedral.h5m",
-    "tests/two_tetrahedrons.h5m",
-]
-
-# Files where pymoab has known issues with volume calculation
-# (h5py uses GEOM_SENSE_2 for proper signed volume, pymoab doesn't)
-H5M_TEST_FILES_PYMOAB_ISSUES = [
     "tests/nestedsphere.h5m",
     "tests/oktavian.h5m",
     "tests/simpletokamak.h5m",
+    "tests/sphere.h5m",
+    "tests/tetrahedral.h5m",
+    "tests/two_tetrahedrons.h5m",
     "tests/twotouchingcuboids.h5m",
 ]
 
 
-@pytest.mark.parametrize("filename", H5M_TEST_FILES_CONSISTENT)
+
+@pytest.mark.parametrize("filename", H5M_TEST_FILES)
+def test_volume_ids_h5py_pymoab_consistency(filename):
+    """Verify h5py and pymoab backends return the same volume IDs"""
+
+    h5py_volumes = di.get_volumes_from_h5m(filename, backend="h5py")
+    pymoab_volumes = di.get_volumes_from_h5m(filename, backend="pymoab")
+
+    assert h5py_volumes == pymoab_volumes, \
+        f"Volume IDs differ: h5py={h5py_volumes}, pymoab={pymoab_volumes}"
+
+
+@pytest.mark.parametrize("filename", H5M_TEST_FILES)
+def test_material_tags_h5py_pymoab_consistency(filename):
+    """Verify h5py and pymoab backends return the same material tags"""
+
+    h5py_materials = di.get_materials_from_h5m(filename, backend="h5py")
+    pymoab_materials = di.get_materials_from_h5m(filename, backend="pymoab")
+
+    assert h5py_materials == pymoab_materials, \
+        f"Material tags differ: h5py={h5py_materials}, pymoab={pymoab_materials}"
+
+
+@pytest.mark.parametrize("filename", H5M_TEST_FILES)
+def test_volumes_and_materials_h5py_pymoab_consistency(filename):
+    """Verify h5py and pymoab backends return the same volume-to-material mapping"""
+
+    h5py_mapping = di.get_volumes_and_materials_from_h5m(filename, backend="h5py")
+    pymoab_mapping = di.get_volumes_and_materials_from_h5m(filename, backend="pymoab")
+
+    assert h5py_mapping == pymoab_mapping, \
+        f"Volume-material mapping differs: h5py={h5py_mapping}, pymoab={pymoab_mapping}"
+
+
+@pytest.mark.parametrize("filename", H5M_TEST_FILES)
 def test_volume_sizes_h5py_pymoab_consistency(filename):
     """Verify h5py and pymoab backends produce the same volume calculations"""
 
@@ -287,7 +316,7 @@ def test_volume_sizes_h5py_pymoab_consistency(filename):
                 f"Volume {vol_id} differs: h5py={h5py_vol}, pymoab={pymoab_vol}"
 
 
-@pytest.mark.parametrize("filename", H5M_TEST_FILES_CONSISTENT)
+@pytest.mark.parametrize("filename", H5M_TEST_FILES)
 def test_volume_sizes_by_material_h5py_pymoab_consistency(filename):
     """Verify h5py and pymoab backends produce the same volume calculations by material"""
 
@@ -312,24 +341,6 @@ def test_volume_sizes_by_material_h5py_pymoab_consistency(filename):
             # For near-zero volumes, use absolute tolerance
             assert abs(h5py_vol - pymoab_vol) < 1e-6, \
                 f"Material '{mat_name}' differs: h5py={h5py_vol}, pymoab={pymoab_vol}"
-
-
-@pytest.mark.parametrize("filename", H5M_TEST_FILES_PYMOAB_ISSUES)
-def test_volume_sizes_h5py_runs_on_complex_geometries(filename):
-    """Verify h5py backend can process complex geometries where pymoab has issues.
-
-    The h5py backend properly uses GEOM_SENSE_2 for signed volume calculation,
-    while the pymoab backend may not correctly handle shared surfaces in
-    complex nested/touching geometries.
-    """
-    h5py_volumes = di.get_volumes_sizes_from_h5m_by_cell_id(filename, backend="h5py")
-
-    # Just verify h5py returns valid volumes
-    assert len(h5py_volumes) > 0
-    for vol_id, volume in h5py_volumes.items():
-        assert isinstance(vol_id, int)
-        assert isinstance(volume, float)
-        assert volume >= 0
 
 
 # ============================================================================

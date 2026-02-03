@@ -26,6 +26,7 @@ jobs:
       - name: install package
         run: |
           python -m pip install --extra-index-url https://shimwell.github.io/wheels moab openmc
+          pip install git+https://github.com/svalinn/pydagmc
           python -m pip install .[tests]
 
       - name: Run test_utils

@@ -610,12 +610,23 @@ def _get_bounding_box_pymoab(filename: str) -> Tuple[np.ndarray, np.ndarray]:
 
 
 def _get_volumes_sizes_pymoab(filename: str) -> dict:
-    """Get geometric volume sizes for each volume ID using pymoab backend."""
+    """Get geometric volume sizes for each volume ID using pymoab backend.
+
+    Uses GEOM_SENSE_2 tag to determine surface orientation relative to each
+    volume, enabling correct signed volume calculation for nested geometries.
+    """
     import pymoab as mb
+    from pymoab import types
 
     mbcore = _load_moab_file(filename)
     category_tag = mbcore.tag_get_handle(mb.types.CATEGORY_TAG_NAME)
     id_tag = mbcore.tag_get_handle(mb.types.GLOBAL_ID_TAG_NAME)
+
+    # Get the GEOM_SENSE_2 tag - this stores [forward_vol, reverse_vol] for each surface
+    try:
+        geom_sense_tag = mbcore.tag_get_handle("GEOM_SENSE_2")
+    except RuntimeError:
+        geom_sense_tag = None
 
     # Get all volumes
     volume_ents = mbcore.get_entities_by_type_and_tag(
@@ -630,19 +641,34 @@ def _get_volumes_sizes_pymoab(filename: str) -> dict:
         # Get child surfaces of this volume
         surfaces = mbcore.get_child_meshsets(vol_ent)
 
-        all_tris = []
+        total_signed_volume = 0.0
+
         for surf in surfaces:
+            # Determine the sign for this surface relative to this volume
+            sign = 1.0
+            if geom_sense_tag is not None:
+                try:
+                    sense_data = mbcore.tag_get_data(geom_sense_tag, surf)
+                    # sense_data is [forward_vol, reverse_vol]
+                    forward_vol = sense_data[0][0]
+                    reverse_vol = sense_data[0][1]
+                    if vol_ent == forward_vol and vol_ent != reverse_vol:
+                        sign = 1.0
+                    elif vol_ent == reverse_vol and vol_ent != forward_vol:
+                        sign = -1.0
+                    # If vol_ent equals both or neither, default to +1
+                except RuntimeError:
+                    pass  # Tag not set for this surface, use default sign
+
             # Get triangles in this surface
             tris = mbcore.get_entities_by_type(surf, mb.types.MBTRI)
-            all_tris.extend(tris)
 
-        if all_tris:
-            # Get connectivity and coordinates for these triangles
-            all_tris_array = np.array(all_tris)
+            if not tris:
+                continue
 
-            # Get all unique vertices
+            # Get all unique vertices for this surface's triangles
             all_verts = set()
-            for tri in all_tris:
+            for tri in tris:
                 conn = mbcore.get_connectivity(tri)
                 all_verts.update(conn)
 
@@ -654,15 +680,21 @@ def _get_volumes_sizes_pymoab(filename: str) -> dict:
 
             # Build triangle array with local indices
             tri_array = []
-            for tri in all_tris:
+            for tri in tris:
                 conn = mbcore.get_connectivity(tri)
                 tri_array.append([vert_to_idx[v] for v in conn])
             tri_array = np.array(tri_array)
 
-            size = _calculate_triangle_volumes(coords, tri_array)
-            volume_sizes[vol_gid] = size
-        else:
-            volume_sizes[vol_gid] = 0.0
+            # Calculate signed volume for this surface's triangles
+            v0 = coords[tri_array[:, 0]]
+            v1 = coords[tri_array[:, 1]]
+            v2 = coords[tri_array[:, 2]]
+            cross = np.cross(v1, v2)
+            surface_signed_volume = np.sum(v0 * cross, axis=1).sum() / 6.0
+
+            total_signed_volume += sign * surface_signed_volume
+
+        volume_sizes[vol_gid] = abs(total_signed_volume)
 
     return volume_sizes
 
