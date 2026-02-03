@@ -610,12 +610,23 @@ def _get_bounding_box_pymoab(filename: str) -> Tuple[np.ndarray, np.ndarray]:
 
 
 def _get_volumes_sizes_pymoab(filename: str) -> dict:
-    """Get geometric volume sizes for each volume ID using pymoab backend."""
+    """Get geometric volume sizes for each volume ID using pymoab backend.
+
+    Uses GEOM_SENSE_2 tag to determine surface orientation relative to each
+    volume, enabling correct signed volume calculation for nested geometries.
+    """
     import pymoab as mb
+    from pymoab import types
 
     mbcore = _load_moab_file(filename)
     category_tag = mbcore.tag_get_handle(mb.types.CATEGORY_TAG_NAME)
     id_tag = mbcore.tag_get_handle(mb.types.GLOBAL_ID_TAG_NAME)
+
+    # Get the GEOM_SENSE_2 tag - this stores [forward_vol, reverse_vol] for each surface
+    try:
+        geom_sense_tag = mbcore.tag_get_handle("GEOM_SENSE_2")
+    except RuntimeError:
+        geom_sense_tag = None
 
     # Get all volumes
     volume_ents = mbcore.get_entities_by_type_and_tag(
@@ -630,19 +641,34 @@ def _get_volumes_sizes_pymoab(filename: str) -> dict:
         # Get child surfaces of this volume
         surfaces = mbcore.get_child_meshsets(vol_ent)
 
-        all_tris = []
+        total_signed_volume = 0.0
+
         for surf in surfaces:
+            # Determine the sign for this surface relative to this volume
+            sign = 1.0
+            if geom_sense_tag is not None:
+                try:
+                    sense_data = mbcore.tag_get_data(geom_sense_tag, surf)
+                    # sense_data is [forward_vol, reverse_vol]
+                    forward_vol = sense_data[0][0]
+                    reverse_vol = sense_data[0][1]
+                    if vol_ent == forward_vol and vol_ent != reverse_vol:
+                        sign = 1.0
+                    elif vol_ent == reverse_vol and vol_ent != forward_vol:
+                        sign = -1.0
+                    # If vol_ent equals both or neither, default to +1
+                except RuntimeError:
+                    pass  # Tag not set for this surface, use default sign
+
             # Get triangles in this surface
             tris = mbcore.get_entities_by_type(surf, mb.types.MBTRI)
-            all_tris.extend(tris)
 
-        if all_tris:
-            # Get connectivity and coordinates for these triangles
-            all_tris_array = np.array(all_tris)
+            if not tris:
+                continue
 
-            # Get all unique vertices
+            # Get all unique vertices for this surface's triangles
             all_verts = set()
-            for tri in all_tris:
+            for tri in tris:
                 conn = mbcore.get_connectivity(tri)
                 all_verts.update(conn)
 
@@ -654,15 +680,21 @@ def _get_volumes_sizes_pymoab(filename: str) -> dict:
 
             # Build triangle array with local indices
             tri_array = []
-            for tri in all_tris:
+            for tri in tris:
                 conn = mbcore.get_connectivity(tri)
                 tri_array.append([vert_to_idx[v] for v in conn])
             tri_array = np.array(tri_array)
 
-            size = _calculate_triangle_volumes(coords, tri_array)
-            volume_sizes[vol_gid] = size
-        else:
-            volume_sizes[vol_gid] = 0.0
+            # Calculate signed volume for this surface's triangles
+            v0 = coords[tri_array[:, 0]]
+            v1 = coords[tri_array[:, 1]]
+            v2 = coords[tri_array[:, 2]]
+            cross = np.cross(v1, v2)
+            surface_signed_volume = np.sum(v0 * cross, axis=1).sum() / 6.0
+
+            total_signed_volume += sign * surface_signed_volume
+
+        volume_sizes[vol_gid] = abs(total_signed_volume)
 
     return volume_sizes
 
@@ -770,7 +802,7 @@ def get_bounding_box_from_h5m(
         return _get_bounding_box_h5py(filename)
 
 
-def get_volumes_sizes_from_h5m(
+def get_volumes_sizes_from_h5m_by_cell_id(
     filename: str,
     backend: Literal["h5py", "pymoab"] = "h5py",
 ) -> dict:
@@ -782,7 +814,7 @@ def get_volumes_sizes_from_h5m(
         backend: the backend to use for reading the file ("h5py" or "pymoab")
 
     Returns:
-        A dictionary mapping volume IDs to their geometric volumes (sizes)
+        A dictionary mapping volume IDs (cell IDs) to their geometric volumes (sizes)
     """
     if not Path(filename).is_file():
         raise FileNotFoundError(f"filename provided ({filename}) does not exist")
@@ -792,6 +824,45 @@ def get_volumes_sizes_from_h5m(
         return _get_volumes_sizes_pymoab(filename)
     else:
         return _get_volumes_sizes_h5py(filename)
+
+
+def get_volumes_sizes_from_h5m_by_material_name(
+    filename: str,
+    backend: Literal["h5py", "pymoab"] = "h5py",
+) -> Dict[str, float]:
+    """Reads in a DAGMC h5m file and calculates the geometric volume
+    for each material, aggregating volumes from all cells with the same material.
+
+    Arguments:
+        filename: the filename of the DAGMC h5m file
+        backend: the backend to use for reading the file ("h5py" or "pymoab")
+
+    Returns:
+        A dictionary mapping material names to their total geometric volumes.
+        If a material is assigned to multiple cells, their volumes are summed.
+    """
+    if not Path(filename).is_file():
+        raise FileNotFoundError(f"filename provided ({filename}) does not exist")
+
+    # Get volume-to-material mapping and volume sizes
+    vol_mat_mapping = get_volumes_and_materials_from_h5m(
+        filename=filename,
+        remove_prefix=True,
+        backend=backend,
+    )
+    volume_sizes = get_volumes_sizes_from_h5m_by_cell_id(
+        filename=filename,
+        backend=backend,
+    )
+
+    # Aggregate volumes by material name
+    material_volumes: Dict[str, float] = {}
+    for vol_id, mat_name in vol_mat_mapping.items():
+        if mat_name not in material_volumes:
+            material_volumes[mat_name] = 0.0
+        material_volumes[mat_name] += volume_sizes.get(vol_id, 0.0)
+
+    return material_volumes
 
 
 def set_openmc_material_volumes_from_h5m(
@@ -843,23 +914,11 @@ def set_openmc_material_volumes_from_h5m(
             )
         seen_names[name] = True
 
-    # Get volume-to-material mapping and volume sizes from DAGMC file
-    vol_mat_mapping = get_volumes_and_materials_from_h5m(
-        filename=filename,
-        remove_prefix=True,
-        backend=backend,
-    )
-    volume_sizes = get_volumes_sizes_from_h5m(
+    # Get volumes aggregated by material name
+    material_volumes = get_volumes_sizes_from_h5m_by_material_name(
         filename=filename,
         backend=backend,
     )
-
-    # Aggregate volumes by material name (in case same material has multiple volumes)
-    material_volumes = {}
-    for vol_id, mat_name in vol_mat_mapping.items():
-        if mat_name not in material_volumes:
-            material_volumes[mat_name] = 0.0
-        material_volumes[mat_name] += volume_sizes.get(vol_id, 0.0)
 
     # Set volumes on matching OpenMC materials
     for mat in materials:

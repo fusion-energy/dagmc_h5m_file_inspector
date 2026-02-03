@@ -1,7 +1,17 @@
+import os
+
 import pytest
 import numpy as np
-import openmc
 import dagmc_h5m_file_inspector as di
+
+# Check if openmc is available
+try:
+    import openmc
+    HAS_OPENMC = True
+except ImportError:
+    HAS_OPENMC = False
+
+requires_openmc = pytest.mark.skipif(not HAS_OPENMC, reason="openmc not installed")
 
 
 # ============================================================================
@@ -103,11 +113,11 @@ def test_bounding_box(touching_boxes, backend):
 
 
 @pytest.mark.parametrize("backend", ["h5py", "pymoab"])
-def test_volume_sizes(touching_boxes, backend):
+def test_volume_sizes_by_cell_id(touching_boxes, backend):
     """Extracts the geometric volumes from a dagmc file and checks they
     match the expected cube volumes"""
 
-    volume_sizes = di.get_volumes_sizes_from_h5m(
+    volume_sizes = di.get_volumes_sizes_from_h5m_by_cell_id(
         filename=touching_boxes['filename'],
         backend=backend,
     )
@@ -118,6 +128,27 @@ def test_volume_sizes(touching_boxes, backend):
         assert vol_id in volume_sizes
         # Allow 5% tolerance for mesh discretization
         assert abs(volume_sizes[vol_id] - expected_size) / expected_size < 0.05
+
+
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+def test_volume_sizes_by_material_name(touching_boxes, backend):
+    """Extracts the geometric volumes by material name from a dagmc file"""
+
+    volume_sizes = di.get_volumes_sizes_from_h5m_by_material_name(
+        filename=touching_boxes['filename'],
+        backend=backend,
+    )
+
+    # small_box is volume 1 (1000), big_box is volume 2 (8000)
+    expected = {
+        'small_box': touching_boxes['expected_volume_sizes'][1],
+        'big_box': touching_boxes['expected_volume_sizes'][2],
+    }
+
+    for mat_name, expected_size in expected.items():
+        assert mat_name in volume_sizes
+        # Allow 5% tolerance for mesh discretization
+        assert abs(volume_sizes[mat_name] - expected_size) / expected_size < 0.05
 
 
 # ============================================================================
@@ -175,11 +206,11 @@ def test_separated_bounding_box(separated_boxes, backend):
 
 
 @pytest.mark.parametrize("backend", ["h5py", "pymoab"])
-def test_separated_volume_sizes(separated_boxes, backend):
+def test_separated_volume_sizes_by_cell_id(separated_boxes, backend):
     """Extracts the geometric volumes from separated boxes and checks they
     match the expected cube volumes"""
 
-    volume_sizes = di.get_volumes_sizes_from_h5m(
+    volume_sizes = di.get_volumes_sizes_from_h5m_by_cell_id(
         filename=separated_boxes['filename'],
         backend=backend,
     )
@@ -192,14 +223,146 @@ def test_separated_volume_sizes(separated_boxes, backend):
         assert abs(volume_sizes[vol_id] - expected_size) / expected_size < 0.05
 
 
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+def test_separated_volume_sizes_by_material_name(separated_boxes, backend):
+    """Extracts the geometric volumes by material name from separated boxes"""
+
+    volume_sizes = di.get_volumes_sizes_from_h5m_by_material_name(
+        filename=separated_boxes['filename'],
+        backend=backend,
+    )
+
+    # box_a is volume 1, box_b is volume 2
+    expected = {
+        'box_a': separated_boxes['expected_volume_sizes'][1],
+        'box_b': separated_boxes['expected_volume_sizes'][2],
+    }
+
+    for mat_name, expected_size in expected.items():
+        assert mat_name in volume_sizes
+        # Allow 5% tolerance for mesh discretization
+        assert abs(volume_sizes[mat_name] - expected_size) / expected_size < 0.05
+
+
+# ============================================================================
+# Tests for h5py and pymoab backend consistency
+# ============================================================================
+
+# All h5m test files
+H5M_TEST_FILES = [
+    "tests/circulartorus.h5m",
+    "tests/cuboid.h5m",
+    "tests/cylinder.h5m",
+    "tests/ellipticaltorus.h5m",
+    "tests/nestedcylinder.h5m",
+    "tests/nestedsphere.h5m",
+    "tests/oktavian.h5m",
+    "tests/simpletokamak.h5m",
+    "tests/sphere.h5m",
+    "tests/tetrahedral.h5m",
+    "tests/two_tetrahedrons.h5m",
+    "tests/twotouchingcuboids.h5m",
+]
+
+
+
+@pytest.mark.parametrize("filename", H5M_TEST_FILES)
+def test_volume_ids_h5py_pymoab_consistency(filename):
+    """Verify h5py and pymoab backends return the same volume IDs"""
+
+    h5py_volumes = di.get_volumes_from_h5m(filename, backend="h5py")
+    pymoab_volumes = di.get_volumes_from_h5m(filename, backend="pymoab")
+
+    assert h5py_volumes == pymoab_volumes, \
+        f"Volume IDs differ: h5py={h5py_volumes}, pymoab={pymoab_volumes}"
+
+
+@pytest.mark.parametrize("filename", H5M_TEST_FILES)
+def test_material_tags_h5py_pymoab_consistency(filename):
+    """Verify h5py and pymoab backends return the same material tags"""
+
+    h5py_materials = di.get_materials_from_h5m(filename, backend="h5py")
+    pymoab_materials = di.get_materials_from_h5m(filename, backend="pymoab")
+
+    assert h5py_materials == pymoab_materials, \
+        f"Material tags differ: h5py={h5py_materials}, pymoab={pymoab_materials}"
+
+
+@pytest.mark.parametrize("filename", H5M_TEST_FILES)
+def test_volumes_and_materials_h5py_pymoab_consistency(filename):
+    """Verify h5py and pymoab backends return the same volume-to-material mapping"""
+
+    h5py_mapping = di.get_volumes_and_materials_from_h5m(filename, backend="h5py")
+    pymoab_mapping = di.get_volumes_and_materials_from_h5m(filename, backend="pymoab")
+
+    assert h5py_mapping == pymoab_mapping, \
+        f"Volume-material mapping differs: h5py={h5py_mapping}, pymoab={pymoab_mapping}"
+
+
+@pytest.mark.parametrize("filename", H5M_TEST_FILES)
+def test_volume_sizes_h5py_pymoab_consistency(filename):
+    """Verify h5py and pymoab backends produce the same volume calculations"""
+
+    h5py_volumes = di.get_volumes_sizes_from_h5m_by_cell_id(filename, backend="h5py")
+    pymoab_volumes = di.get_volumes_sizes_from_h5m_by_cell_id(filename, backend="pymoab")
+
+    # Check same volume IDs are returned
+    assert set(h5py_volumes.keys()) == set(pymoab_volumes.keys()), \
+        f"Volume IDs differ: h5py={set(h5py_volumes.keys())}, pymoab={set(pymoab_volumes.keys())}"
+
+    # Check volumes match within tolerance
+    for vol_id in h5py_volumes:
+        h5py_vol = h5py_volumes[vol_id]
+        pymoab_vol = pymoab_volumes[vol_id]
+
+        # Use relative tolerance for non-zero volumes
+        if pymoab_vol > 1e-10:
+            rel_diff = abs(h5py_vol - pymoab_vol) / pymoab_vol
+            assert rel_diff < 0.01, \
+                f"Volume {vol_id} differs: h5py={h5py_vol}, pymoab={pymoab_vol}, rel_diff={rel_diff}"
+        else:
+            # For near-zero volumes, use absolute tolerance
+            assert abs(h5py_vol - pymoab_vol) < 1e-6, \
+                f"Volume {vol_id} differs: h5py={h5py_vol}, pymoab={pymoab_vol}"
+
+
+@pytest.mark.parametrize("filename", H5M_TEST_FILES)
+def test_volume_sizes_by_material_h5py_pymoab_consistency(filename):
+    """Verify h5py and pymoab backends produce the same volume calculations by material"""
+
+    h5py_volumes = di.get_volumes_sizes_from_h5m_by_material_name(filename, backend="h5py")
+    pymoab_volumes = di.get_volumes_sizes_from_h5m_by_material_name(filename, backend="pymoab")
+
+    # Check same material names are returned
+    assert set(h5py_volumes.keys()) == set(pymoab_volumes.keys()), \
+        f"Material names differ: h5py={set(h5py_volumes.keys())}, pymoab={set(pymoab_volumes.keys())}"
+
+    # Check volumes match within tolerance
+    for mat_name in h5py_volumes:
+        h5py_vol = h5py_volumes[mat_name]
+        pymoab_vol = pymoab_volumes[mat_name]
+
+        # Use relative tolerance for non-zero volumes
+        if pymoab_vol > 1e-10:
+            rel_diff = abs(h5py_vol - pymoab_vol) / pymoab_vol
+            assert rel_diff < 0.01, \
+                f"Material '{mat_name}' differs: h5py={h5py_vol}, pymoab={pymoab_vol}, rel_diff={rel_diff}"
+        else:
+            # For near-zero volumes, use absolute tolerance
+            assert abs(h5py_vol - pymoab_vol) < 1e-6, \
+                f"Material '{mat_name}' differs: h5py={h5py_vol}, pymoab={pymoab_vol}"
+
+
 # ============================================================================
 # Tests for OpenMC material volume assignment
 # ============================================================================
 
 
+@requires_openmc
 @pytest.mark.parametrize("backend", ["h5py", "pymoab"])
 def test_set_openmc_material_volumes_with_list(touching_boxes, backend):
     """Tests setting volumes on a list of OpenMC materials"""
+    import openmc
 
     # Create OpenMC materials matching the DAGMC material names
     small_box_mat = openmc.Material(name='small_box')
@@ -224,9 +387,11 @@ def test_set_openmc_material_volumes_with_list(touching_boxes, backend):
     assert abs(big_box_mat.volume - expected[2]) / expected[2] < 0.05
 
 
+@requires_openmc
 @pytest.mark.parametrize("backend", ["h5py", "pymoab"])
 def test_set_openmc_material_volumes_with_materials_object(touching_boxes, backend):
     """Tests setting volumes on an OpenMC Materials collection"""
+    import openmc
 
     # Create OpenMC materials and add to Materials collection
     small_box_mat = openmc.Material(name='small_box')
@@ -246,9 +411,11 @@ def test_set_openmc_material_volumes_with_materials_object(touching_boxes, backe
     assert abs(big_box_mat.volume - expected[2]) / expected[2] < 0.05
 
 
+@requires_openmc
 @pytest.mark.parametrize("backend", ["h5py", "pymoab"])
 def test_set_openmc_material_volumes_non_matching_materials(touching_boxes, backend):
     """Tests that materials without matching names are not affected"""
+    import openmc
 
     # Create materials - one matching, one not
     small_box_mat = openmc.Material(name='small_box')
@@ -270,9 +437,11 @@ def test_set_openmc_material_volumes_non_matching_materials(touching_boxes, back
     assert unmatched_mat.volume is None
 
 
+@requires_openmc
 @pytest.mark.parametrize("backend", ["h5py", "pymoab"])
 def test_set_openmc_material_volumes_duplicate_names_error(touching_boxes, backend):
     """Tests that duplicate material names raise an error"""
+    import openmc
 
     # Create materials with duplicate names
     mat1 = openmc.Material(name='small_box')
@@ -288,9 +457,11 @@ def test_set_openmc_material_volumes_duplicate_names_error(touching_boxes, backe
         )
 
 
+@requires_openmc
 @pytest.mark.parametrize("backend", ["h5py", "pymoab"])
 def test_set_openmc_material_volumes_file_not_found(backend):
     """Tests that missing file raises FileNotFoundError"""
+    import openmc
 
     mat = openmc.Material(name='test')
     materials = [mat]
@@ -303,9 +474,11 @@ def test_set_openmc_material_volumes_file_not_found(backend):
         )
 
 
+@requires_openmc
 @pytest.mark.parametrize("backend", ["h5py", "pymoab"])
 def test_set_openmc_material_volumes_with_none_names(touching_boxes, backend):
     """Tests that materials with None names are ignored without error"""
+    import openmc
 
     # Create materials - one with name, one without
     small_box_mat = openmc.Material(name='small_box')
@@ -325,3 +498,147 @@ def test_set_openmc_material_volumes_with_none_names(touching_boxes, backend):
 
     # Unnamed material should remain unchanged
     assert unnamed_mat.volume is None
+
+
+# ============================================================================
+# Tests comparing volume calculations with pydagmc and OpenMC stochastic
+# ============================================================================
+
+
+@pytest.mark.parametrize("filename", H5M_TEST_FILES)
+def test_volume_sizes_pydagmc_consistency(filename):
+    """Verify our volume calculations match pydagmc results"""
+    import warnings
+    import pydagmc
+
+    # Get volumes from our implementations
+    h5py_volumes = di.get_volumes_sizes_from_h5m_by_cell_id(filename, backend="h5py")
+
+    # Get volumes from pydagmc
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        dag_model = pydagmc.Model(filename)
+
+    pydagmc_volumes = {
+        int(vol_id): float(vol.volume)
+        for vol_id, vol in dag_model.volumes_by_id.items()
+    }
+
+    # Check same volume IDs are returned
+    assert set(h5py_volumes.keys()) == set(pydagmc_volumes.keys()), \
+        f"Volume IDs differ: h5py={set(h5py_volumes.keys())}, pydagmc={set(pydagmc_volumes.keys())}"
+
+    # Check volumes match within tolerance
+    for vol_id in h5py_volumes:
+        h5py_vol = h5py_volumes[vol_id]
+        pydagmc_vol = pydagmc_volumes[vol_id]
+
+        # Use relative tolerance for non-zero volumes
+        if pydagmc_vol > 1e-10:
+            rel_diff = abs(h5py_vol - pydagmc_vol) / pydagmc_vol
+            assert rel_diff < 0.01, \
+                f"Volume {vol_id} differs: h5py={h5py_vol}, pydagmc={pydagmc_vol}, rel_diff={rel_diff}"
+        else:
+            # For near-zero volumes, use absolute tolerance
+            assert abs(h5py_vol - pydagmc_vol) < 1e-6, \
+                f"Volume {vol_id} differs: h5py={h5py_vol}, pydagmc={pydagmc_vol}"
+
+
+# Subset of files for OpenMC stochastic tests (faster execution)
+H5M_TEST_FILES_OPENMC_STOCHASTIC = [
+    "tests/cuboid.h5m",
+    "tests/sphere.h5m",
+    "tests/nestedsphere.h5m",
+    "tests/cylinder.h5m",
+]
+
+
+@requires_openmc
+@pytest.mark.parametrize("filename", H5M_TEST_FILES_OPENMC_STOCHASTIC)
+@pytest.mark.skipif(
+    os.environ.get("CI") == "true" or os.environ.get("GITHUB_ACTIONS") == "true",
+    reason="OpenMC stochastic volume tests skipped in CI (requires cross sections data)"
+)
+def test_volume_sizes_openmc_stochastic_consistency(filename, tmp_path):
+    """Verify our volume calculations match OpenMC stochastic results.
+
+    OpenMC uses Monte Carlo sampling to estimate volumes, so we allow
+    a larger tolerance (5%) to account for statistical noise.
+
+    This test is skipped in CI environments as it requires OpenMC cross
+    sections data to be installed.
+    """
+    import openmc
+    from pathlib import Path
+
+    # Convert to absolute path before changing directories
+    abs_filename = str(Path(filename).resolve())
+
+    # Get volumes and materials from our implementation
+    h5py_volumes = di.get_volumes_sizes_from_h5m_by_cell_id(abs_filename, backend="h5py")
+    lower, upper = di.get_bounding_box_from_h5m(abs_filename)
+    materials_list = di.get_materials_from_h5m(abs_filename, remove_prefix=True)
+
+    # Create OpenMC materials matching the DAGMC file
+    openmc_mats = []
+    for mat_name in materials_list:
+        mat = openmc.Material(name=mat_name)
+        mat.add_nuclide('H1', 1.0)
+        mat.set_density('g/cm3', 1.0)
+        openmc_mats.append(mat)
+    materials = openmc.Materials(openmc_mats)
+
+    # Create DAGMC universe and geometry
+    dagmc_univ = openmc.DAGMCUniverse(abs_filename, auto_geom_ids=True)
+    bounded_univ = dagmc_univ.bounded_universe()
+    geometry = openmc.Geometry(bounded_univ)
+
+    # Settings for volume calculation
+    settings = openmc.Settings()
+    settings.run_mode = 'volume'
+
+    # Create volume calculation for all materials
+    vol_calc = openmc.VolumeCalculation(
+        domains=openmc_mats,
+        samples=50000,
+        lower_left=lower.tolist(),
+        upper_right=upper.tolist()
+    )
+    settings.volume_calculations = [vol_calc]
+
+    # Build and run model
+    model = openmc.Model(geometry=geometry, materials=materials, settings=settings)
+
+    # Change to temp directory to avoid polluting the test directory
+    original_dir = os.getcwd()
+    os.chdir(tmp_path)
+    try:
+        model.run(output=False)
+
+        # Read results
+        results = openmc.VolumeCalculation.from_hdf5('volume_1.h5')
+
+        # Get OpenMC volumes by material name
+        openmc_volumes_by_mat = {}
+        for domain, vol in results.volumes.items():
+            # domain is the material ID
+            for mat in openmc_mats:
+                if mat.id == domain:
+                    openmc_volumes_by_mat[mat.name] = vol.nominal_value
+                    break
+
+        # Get our volumes by material name for comparison
+        h5py_volumes_by_mat = di.get_volumes_sizes_from_h5m_by_material_name(abs_filename, backend="h5py")
+
+        # Compare volumes (allow 5% tolerance for stochastic noise)
+        for mat_name in h5py_volumes_by_mat:
+            if mat_name in openmc_volumes_by_mat:
+                h5py_vol = h5py_volumes_by_mat[mat_name]
+                openmc_vol = openmc_volumes_by_mat[mat_name]
+
+                if openmc_vol > 1e-10:
+                    rel_diff = abs(h5py_vol - openmc_vol) / openmc_vol
+                    assert rel_diff < 0.05, \
+                        f"Material '{mat_name}' volume differs: h5py={h5py_vol}, openmc={openmc_vol}, rel_diff={rel_diff}"
+    finally:
+        os.chdir(original_dir)
