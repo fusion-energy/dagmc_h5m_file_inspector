@@ -4,6 +4,15 @@ import pytest
 import numpy as np
 import dagmc_h5m_file_inspector as di
 
+# Check if openmc is available
+try:
+    import openmc
+    HAS_OPENMC = True
+except ImportError:
+    HAS_OPENMC = False
+
+requires_openmc = pytest.mark.skipif(not HAS_OPENMC, reason="openmc not installed")
+
 
 # ============================================================================
 # Tests for touching boxes geometry
@@ -349,6 +358,7 @@ def test_volume_sizes_by_material_h5py_pymoab_consistency(filename):
 # ============================================================================
 
 
+@requires_openmc
 @pytest.mark.parametrize("backend", ["h5py", "pymoab"])
 def test_set_openmc_material_volumes_with_list(touching_boxes, backend):
     """Tests setting volumes on a list of OpenMC materials"""
@@ -377,6 +387,7 @@ def test_set_openmc_material_volumes_with_list(touching_boxes, backend):
     assert abs(big_box_mat.volume - expected[2]) / expected[2] < 0.05
 
 
+@requires_openmc
 @pytest.mark.parametrize("backend", ["h5py", "pymoab"])
 def test_set_openmc_material_volumes_with_materials_object(touching_boxes, backend):
     """Tests setting volumes on an OpenMC Materials collection"""
@@ -400,6 +411,7 @@ def test_set_openmc_material_volumes_with_materials_object(touching_boxes, backe
     assert abs(big_box_mat.volume - expected[2]) / expected[2] < 0.05
 
 
+@requires_openmc
 @pytest.mark.parametrize("backend", ["h5py", "pymoab"])
 def test_set_openmc_material_volumes_non_matching_materials(touching_boxes, backend):
     """Tests that materials without matching names are not affected"""
@@ -425,6 +437,7 @@ def test_set_openmc_material_volumes_non_matching_materials(touching_boxes, back
     assert unmatched_mat.volume is None
 
 
+@requires_openmc
 @pytest.mark.parametrize("backend", ["h5py", "pymoab"])
 def test_set_openmc_material_volumes_duplicate_names_error(touching_boxes, backend):
     """Tests that duplicate material names raise an error"""
@@ -444,6 +457,7 @@ def test_set_openmc_material_volumes_duplicate_names_error(touching_boxes, backe
         )
 
 
+@requires_openmc
 @pytest.mark.parametrize("backend", ["h5py", "pymoab"])
 def test_set_openmc_material_volumes_file_not_found(backend):
     """Tests that missing file raises FileNotFoundError"""
@@ -460,6 +474,7 @@ def test_set_openmc_material_volumes_file_not_found(backend):
         )
 
 
+@requires_openmc
 @pytest.mark.parametrize("backend", ["h5py", "pymoab"])
 def test_set_openmc_material_volumes_with_none_names(touching_boxes, backend):
     """Tests that materials with None names are ignored without error"""
@@ -538,6 +553,7 @@ H5M_TEST_FILES_OPENMC_STOCHASTIC = [
 ]
 
 
+@requires_openmc
 @pytest.mark.parametrize("filename", H5M_TEST_FILES_OPENMC_STOCHASTIC)
 @pytest.mark.skipif(
     os.environ.get("CI") == "true" or os.environ.get("GITHUB_ACTIONS") == "true",
