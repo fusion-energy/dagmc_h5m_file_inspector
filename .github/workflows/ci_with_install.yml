@@ -14,21 +14,18 @@ on:
 jobs:
   testing:
     runs-on: ubuntu-latest
-    container:
-      image: continuumio/miniconda3
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v2
+        uses: actions/checkout@v6
       
       - name: install package
         run: |
-          conda install -c conda-forge moab
-          pip install pytest
-          python setup.py install
+          python -m pip install --extra-index-url https://shimwell.github.io/wheels moab
+          python -m pip install .[tests]
 
       - name: Run test_utils
         run: |
-          pytest tests
+          python -m pytest
 
       - name: Upload to codecov
         uses: codecov/codecov-action@v2
