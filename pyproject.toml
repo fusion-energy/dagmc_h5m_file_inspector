@@ -16,6 +16,10 @@ classifiers = [
     "Programming Language :: Python :: 3",
     "Operating System :: OS Independent",
 ]
+dependencies = [
+    "h5py",
+]
+
 [project.urls]
 Homepage = "https://github.com/fusion-energy/dagmc_h5m_file_inspector"
 Source = "https://github.com/fusion-energy/dagmc_h5m_file_inspector"
@@ -25,6 +29,9 @@ Tracker = "https://github.com/fusion-energy/dagmc_h5m_file_inspector/issues"
 inspect-dagmc-h5m-file = "dagmc_h5m_file_inspector.cli:main"
 
 [project.optional-dependencies]
+pymoab = [
+    "pymoab",
+]
 tests = [
     "pytest >= 5.4.3",
     "requests",
