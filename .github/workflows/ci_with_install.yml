@@ -17,7 +17,12 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
-      
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libglu1-mesa libgl1-mesa-glx
+
       - name: install package
         run: |
           python -m pip install --extra-index-url https://shimwell.github.io/wheels moab
