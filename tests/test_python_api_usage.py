@@ -1,5 +1,6 @@
 import pytest
 import numpy as np
+import openmc
 import dagmc_h5m_file_inspector as di
 
 
@@ -101,10 +102,7 @@ def test_bounding_box(touching_boxes, backend):
     np.testing.assert_allclose(upper_right, touching_boxes['upper_right'], rtol=1e-5)
 
 
-@pytest.mark.parametrize("backend", [
-    pytest.param("h5py", marks=pytest.mark.xfail(reason="h5py volume size calculation not yet implemented")),
-    "pymoab",
-])
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
 def test_volume_sizes(touching_boxes, backend):
     """Extracts the geometric volumes from a dagmc file and checks they
     match the expected cube volumes"""
@@ -176,10 +174,7 @@ def test_separated_bounding_box(separated_boxes, backend):
     np.testing.assert_allclose(upper_right, separated_boxes['upper_right'], rtol=1e-5)
 
 
-@pytest.mark.parametrize("backend", [
-    pytest.param("h5py", marks=pytest.mark.xfail(reason="h5py volume size calculation not yet implemented")),
-    "pymoab",
-])
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
 def test_separated_volume_sizes(separated_boxes, backend):
     """Extracts the geometric volumes from separated boxes and checks they
     match the expected cube volumes"""
@@ -195,3 +190,138 @@ def test_separated_volume_sizes(separated_boxes, backend):
         assert vol_id in volume_sizes
         # Allow 5% tolerance for mesh discretization
         assert abs(volume_sizes[vol_id] - expected_size) / expected_size < 0.05
+
+
+# ============================================================================
+# Tests for OpenMC material volume assignment
+# ============================================================================
+
+
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+def test_set_openmc_material_volumes_with_list(touching_boxes, backend):
+    """Tests setting volumes on a list of OpenMC materials"""
+
+    # Create OpenMC materials matching the DAGMC material names
+    small_box_mat = openmc.Material(name='small_box')
+    big_box_mat = openmc.Material(name='big_box')
+    materials = [small_box_mat, big_box_mat]
+
+    # Initially volumes should be None
+    assert small_box_mat.volume is None
+    assert big_box_mat.volume is None
+
+    # Set volumes from DAGMC file
+    di.set_openmc_material_volumes_from_h5m(
+        materials=materials,
+        filename=touching_boxes['filename'],
+        backend=backend,
+    )
+
+    # Check volumes are set correctly (with 5% tolerance for mesh discretization)
+    expected = touching_boxes['expected_volume_sizes']
+    # small_box is volume 1, big_box is volume 2
+    assert abs(small_box_mat.volume - expected[1]) / expected[1] < 0.05
+    assert abs(big_box_mat.volume - expected[2]) / expected[2] < 0.05
+
+
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+def test_set_openmc_material_volumes_with_materials_object(touching_boxes, backend):
+    """Tests setting volumes on an OpenMC Materials collection"""
+
+    # Create OpenMC materials and add to Materials collection
+    small_box_mat = openmc.Material(name='small_box')
+    big_box_mat = openmc.Material(name='big_box')
+    materials = openmc.Materials([small_box_mat, big_box_mat])
+
+    # Set volumes from DAGMC file
+    di.set_openmc_material_volumes_from_h5m(
+        materials=materials,
+        filename=touching_boxes['filename'],
+        backend=backend,
+    )
+
+    # Check volumes are set correctly
+    expected = touching_boxes['expected_volume_sizes']
+    assert abs(small_box_mat.volume - expected[1]) / expected[1] < 0.05
+    assert abs(big_box_mat.volume - expected[2]) / expected[2] < 0.05
+
+
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+def test_set_openmc_material_volumes_non_matching_materials(touching_boxes, backend):
+    """Tests that materials without matching names are not affected"""
+
+    # Create materials - one matching, one not
+    small_box_mat = openmc.Material(name='small_box')
+    unmatched_mat = openmc.Material(name='nonexistent_material')
+    materials = [small_box_mat, unmatched_mat]
+
+    # Set volumes from DAGMC file
+    di.set_openmc_material_volumes_from_h5m(
+        materials=materials,
+        filename=touching_boxes['filename'],
+        backend=backend,
+    )
+
+    # Matching material should have volume set
+    expected = touching_boxes['expected_volume_sizes']
+    assert abs(small_box_mat.volume - expected[1]) / expected[1] < 0.05
+
+    # Non-matching material should remain None
+    assert unmatched_mat.volume is None
+
+
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+def test_set_openmc_material_volumes_duplicate_names_error(touching_boxes, backend):
+    """Tests that duplicate material names raise an error"""
+
+    # Create materials with duplicate names
+    mat1 = openmc.Material(name='small_box')
+    mat2 = openmc.Material(name='small_box')  # Duplicate!
+    materials = [mat1, mat2]
+
+    # Should raise ValueError for duplicate names
+    with pytest.raises(ValueError, match="Multiple OpenMC materials have the same name"):
+        di.set_openmc_material_volumes_from_h5m(
+            materials=materials,
+            filename=touching_boxes['filename'],
+            backend=backend,
+        )
+
+
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+def test_set_openmc_material_volumes_file_not_found(backend):
+    """Tests that missing file raises FileNotFoundError"""
+
+    mat = openmc.Material(name='test')
+    materials = [mat]
+
+    with pytest.raises(FileNotFoundError):
+        di.set_openmc_material_volumes_from_h5m(
+            materials=materials,
+            filename='nonexistent_file.h5m',
+            backend=backend,
+        )
+
+
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+def test_set_openmc_material_volumes_with_none_names(touching_boxes, backend):
+    """Tests that materials with None names are ignored without error"""
+
+    # Create materials - one with name, one without
+    small_box_mat = openmc.Material(name='small_box')
+    unnamed_mat = openmc.Material()  # No name (defaults to None)
+    materials = [small_box_mat, unnamed_mat]
+
+    # Should not raise error, unnamed materials are skipped
+    di.set_openmc_material_volumes_from_h5m(
+        materials=materials,
+        filename=touching_boxes['filename'],
+        backend=backend,
+    )
+
+    # Named material should have volume set
+    expected = touching_boxes['expected_volume_sizes']
+    assert abs(small_box_mat.volume - expected[1]) / expected[1] < 0.05
+
+    # Unnamed material should remain unchanged
+    assert unnamed_mat.volume is None
