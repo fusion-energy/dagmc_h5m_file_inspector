@@ -1,8 +1,23 @@
+from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional, Literal, Tuple
+from typing import Dict, List, Optional, Literal, Sequence, Tuple, Union
 
 import h5py
 import numpy as np
+
+
+RANGE_COMPRESSED_FLAG = 0x8
+
+
+@dataclass(frozen=True)
+class _SetInfo:
+    """Internal dataclass for storing MOAB set information."""
+    handle: int
+    contents: Sequence[int] | Sequence[Tuple[int, int]]
+    contents_are_ranges: bool
+    children: Sequence[int]
+    parents: Sequence[int]
+    flags: int
 
 
 # ============================================================================
@@ -122,6 +137,284 @@ def _calculate_triangle_volumes(vertices: np.ndarray, triangles: np.ndarray) -> 
     return abs(np.sum(signed_volumes))
 
 
+# ============================================================================
+# h5py volume calculation helpers
+# ============================================================================
+
+
+def _read_nodes_h5py(f: h5py.File) -> Tuple[np.ndarray, int]:
+    """Read node coordinates and start ID from h5py file."""
+    nodes = f["tstt/nodes/coordinates"]
+    coords = nodes[...]
+    node_start = int(nodes.attrs["start_id"])
+    return coords, node_start
+
+
+def _read_tri3_connectivity_h5py(f: h5py.File) -> Tuple[np.ndarray, int]:
+    """Read triangle connectivity and start ID from h5py file."""
+    tri = f["tstt/elements/Tri3/connectivity"]
+    tri_conn = tri[...]
+    tri_start = int(tri.attrs["start_id"])
+    return tri_conn, tri_start
+
+
+def _slices_from_end_indices(ends: np.ndarray) -> List[Optional[slice]]:
+    """Convert end indices to slices."""
+    prev_end = -1
+    slices: List[Optional[slice]] = []
+    for end in ends.tolist():
+        start = prev_end + 1
+        if end >= start:
+            slices.append(slice(start, end + 1))
+        else:
+            slices.append(None)
+        prev_end = end
+    return slices
+
+
+def _read_sets_h5py(f: h5py.File) -> List[_SetInfo]:
+    """Read all entity sets from h5py file."""
+    list_ds = f["tstt/sets/list"]
+    list_arr = list_ds[...]
+    start_id = int(list_ds.attrs["start_id"])
+    contents = f["tstt/sets/contents"][...]
+    children = f["tstt/sets/children"][...]
+    parents = f["tstt/sets/parents"][...]
+
+    contents_slices = _slices_from_end_indices(list_arr[:, 0])
+    children_slices = _slices_from_end_indices(list_arr[:, 1])
+    parents_slices = _slices_from_end_indices(list_arr[:, 2])
+
+    sets: List[_SetInfo] = []
+    for idx in range(list_arr.shape[0]):
+        handle = start_id + idx
+        flags = int(list_arr[idx, 3])
+
+        contents_slice = contents_slices[idx]
+        if contents_slice is None:
+            contents_data: Sequence[int] | Sequence[Tuple[int, int]] = []
+            contents_are_ranges = False
+        else:
+            data = contents[contents_slice]
+            if flags & RANGE_COMPRESSED_FLAG:
+                if len(data) % 2 != 0:
+                    raise ValueError(
+                        f"Range-compressed contents for set {handle} "
+                        f"has odd length {len(data)}"
+                    )
+                contents_data = [
+                    (int(data[i]), int(data[i + 1]))
+                    for i in range(0, len(data), 2)
+                ]
+                contents_are_ranges = True
+            else:
+                contents_data = [int(v) for v in data]
+                contents_are_ranges = False
+
+        children_slice = children_slices[idx]
+        if children_slice is None:
+            child_list: Sequence[int] = []
+        else:
+            child_list = [int(v) for v in children[children_slice]]
+
+        parents_slice = parents_slices[idx]
+        if parents_slice is None:
+            parent_list: Sequence[int] = []
+        else:
+            parent_list = [int(v) for v in parents[parents_slice]]
+
+        sets.append(
+            _SetInfo(
+                handle=handle,
+                contents=contents_data,
+                contents_are_ranges=contents_are_ranges,
+                children=child_list,
+                parents=parent_list,
+                flags=flags,
+            )
+        )
+
+    return sets
+
+
+def _read_tag_h5py(f: h5py.File, tag_name: str) -> Dict[int, object]:
+    """Read a tag from h5py file and return handle -> value mapping."""
+    try:
+        tag_group = f[f"tstt/tags/{tag_name}"]
+    except KeyError:
+        return {}
+
+    if "id_list" not in tag_group or "values" not in tag_group:
+        return {}
+
+    ids = tag_group["id_list"][...]
+    values = tag_group["values"][...]
+
+    decoded: Dict[int, object] = {}
+    if values.dtype.kind in {"S", "V"}:
+        for h, v in zip(ids, values):
+            if hasattr(v, "tobytes"):
+                data = v.tobytes()
+            else:
+                data = bytes(v)
+            decoded[int(h)] = data.split(b"\x00", 1)[0].decode("ascii", "replace")
+    else:
+        for h, v in zip(ids, values):
+            decoded[int(h)] = int(v) if np.issubdtype(values.dtype, np.integer) else v
+
+    return decoded
+
+
+def _read_geom_sense_h5py(f: h5py.File) -> Dict[int, Tuple[int, int]]:
+    """Read GEOM_SENSE_2 tag from h5py file."""
+    try:
+        tag_group = f["tstt/tags/GEOM_SENSE_2"]
+    except KeyError:
+        return {}
+
+    if "id_list" not in tag_group or "values" not in tag_group:
+        return {}
+
+    ids = tag_group["id_list"][...]
+    values = tag_group["values"][...]
+    return {
+        int(h): (int(v[0]), int(v[1]))
+        for h, v in zip(ids, values)
+    }
+
+
+def _expand_set_contents(
+    set_info: _SetInfo,
+    target_min: Optional[int] = None,
+    target_max: Optional[int] = None,
+) -> List[int]:
+    """Expand set contents, handling range compression."""
+    if not set_info.contents:
+        return []
+
+    if not set_info.contents_are_ranges:
+        return [int(v) for v in set_info.contents]
+
+    handles: List[int] = []
+    for start, count in set_info.contents:
+        end = start + count - 1
+        if target_min is not None:
+            start = max(start, target_min)
+        if target_max is not None:
+            end = min(end, target_max)
+        if start <= end:
+            handles.extend(range(start, end + 1))
+    return handles
+
+
+def _surface_sign_for_volume(
+    vol_handle: int,
+    sense: Optional[Tuple[int, int]],
+) -> float:
+    """Determine surface sign (+1 or -1) relative to a volume."""
+    if sense is None:
+        return 1.0
+    forward, reverse = sense
+    if vol_handle == forward and vol_handle != reverse:
+        return 1.0
+    if vol_handle == reverse and vol_handle != forward:
+        return -1.0
+    return 1.0
+
+
+def _tri_indices_for_set(
+    set_info: _SetInfo,
+    *,
+    tri_start: int,
+    tri_end: int,
+) -> np.ndarray:
+    """Get triangle indices (0-based) for a set."""
+    if not set_info.contents:
+        return np.array([], dtype=np.int64)
+
+    if set_info.contents_are_ranges:
+        indices: List[int] = []
+        for start, count in set_info.contents:
+            end = start + count - 1
+            if end < tri_start or start > tri_end:
+                continue
+            start = max(start, tri_start)
+            end = min(end, tri_end)
+            indices.extend(range(start - tri_start, end - tri_start + 1))
+        return np.asarray(indices, dtype=np.int64)
+
+    handles = [
+        h for h in set_info.contents
+        if tri_start <= h <= tri_end
+    ]
+    if not handles:
+        return np.array([], dtype=np.int64)
+    return np.asarray(handles, dtype=np.int64) - tri_start
+
+
+def _signed_volume_from_tris(
+    coords: np.ndarray,
+    tri_conn0: np.ndarray,
+    tri_indices: np.ndarray,
+) -> float:
+    """Calculate signed volume from triangles using tetrahedra method."""
+    tri_nodes = tri_conn0[tri_indices]
+    v0 = coords[tri_nodes[:, 0]]
+    v1 = coords[tri_nodes[:, 1]]
+    v2 = coords[tri_nodes[:, 2]]
+    return float(np.einsum("ij,ij->i", v0, np.cross(v1, v2)).sum() / 6.0)
+
+
+def _volume_for_volume_set(
+    *,
+    vol_handle: int,
+    sets_by_handle: Dict[int, _SetInfo],
+    surface_handles: set,
+    geom_sense: Dict[int, Tuple[int, int]],
+    coords: np.ndarray,
+    tri_conn0: np.ndarray,
+    tri_start: int,
+    tri_end: int,
+) -> float:
+    """Calculate the geometric volume for a single volume entity."""
+    volume_set = sets_by_handle.get(vol_handle)
+    if volume_set is None:
+        return 0.0
+
+    if volume_set.children:
+        surfaces = [h for h in volume_set.children if h in surface_handles]
+    else:
+        surfaces = [
+            h for h in surface_handles
+            if h in geom_sense and vol_handle in geom_sense[h]
+        ]
+
+    total = 0.0
+    for surf_handle in surfaces:
+        surf_set = sets_by_handle.get(surf_handle)
+        if surf_set is None:
+            continue
+
+        sense = geom_sense.get(surf_handle)
+        sign = _surface_sign_for_volume(vol_handle, sense)
+
+        tri_indices = _tri_indices_for_set(
+            surf_set,
+            tri_start=tri_start,
+            tri_end=tri_end,
+        )
+        if tri_indices.size == 0:
+            continue
+
+        total += sign * _signed_volume_from_tris(
+            coords,
+            tri_conn0,
+            tri_indices,
+        )
+
+    return total
+
+
 def _get_volumes_sizes_h5py(filename: str) -> dict:
     """Get geometric volume sizes for each volume ID using h5py backend.
 
@@ -129,116 +422,71 @@ def _get_volumes_sizes_h5py(filename: str) -> dict:
     to properly assign surfaces to volumes with correct orientation.
     """
     with h5py.File(filename, "r") as f:
-        # Get node coordinates
-        coords = f["tstt/nodes/coordinates"][()]
+        coords, node_start = _read_nodes_h5py(f)
+        tri_conn, tri_start = _read_tri3_connectivity_h5py(f)
+        tri_conn0 = tri_conn - node_start
+        tri_end = tri_start + tri_conn.shape[0] - 1
 
-        # Get triangle connectivity (1-indexed node references in MOAB)
-        triangles = f["tstt/elements/Tri3/connectivity"][()]
-        triangles = triangles - 1  # Convert to 0-indexed
+        sets = _read_sets_h5py(f)
+        sets_by_handle = {s.handle: s for s in sets}
 
-        # Get entity set information
-        global_ids = f["tstt/sets/tags/GLOBAL_ID"][()]
-        sets_list = f["tstt/sets/list"][()]
-        children = f["tstt/sets/children"][()]
+        categories = _read_tag_h5py(f, "CATEGORY")
+        geom_dim = _read_tag_h5py(f, "GEOM_DIMENSION")
+        geom_sense = _read_geom_sense_h5py(f)
 
-        cat_ids = f["tstt/tags/CATEGORY/id_list"][()]
-        cat_vals = f["tstt/tags/CATEGORY/values"][()]
+        # Get GLOBAL_ID for sets - this can be stored as:
+        # 1. Dense array in tstt/sets/tags/GLOBAL_ID
+        # 2. Sparse tag in tstt/tags/GLOBAL_ID with id_list/values
+        global_ids: Dict[int, int] = {}
 
-        # Get geometry sense for proper surface orientation
-        sense_ids = f["tstt/tags/GEOM_SENSE_2/id_list"][()]
-        sense_vals = f["tstt/tags/GEOM_SENSE_2/values"][()]
+        # Try dense array first (more common)
+        sets_start_id = int(f["tstt/sets/list"].attrs["start_id"])
+        if "tstt/sets/tags/GLOBAL_ID" in f:
+            dense_gids = f["tstt/sets/tags/GLOBAL_ID"][...]
+            for idx, gid in enumerate(dense_gids):
+                handle = sets_start_id + idx
+                global_ids[handle] = int(gid)
+        else:
+            # Fall back to sparse tag
+            global_ids = _read_tag_h5py(f, "GLOBAL_ID")
 
-        # Build lookups
-        cat_lookup = {}
-        for eid, val in zip(cat_ids, cat_vals):
-            cat_lookup[int(eid)] = val.tobytes().decode("ascii").rstrip("\x00")
+        # Build set of surface handles
+        surface_handles = {
+            h
+            for h, cat in categories.items()
+            if cat == "Surface"
+        }
+        surface_handles.update(
+            h for h, dim in geom_dim.items() if dim == 2
+        )
 
-        base_entity_id = int(cat_ids.min()) - 1
-        entity_to_set_idx = {base_entity_id + i: i for i in range(len(sets_list))}
-
-        # Build surface sense lookup: surface_entity -> {vol_entity: sense_sign}
-        # sense_sign is +1 for forward (outward normal), -1 for reverse
-        surface_sense = {}
-        for surf_id, sense in zip(sense_ids, sense_vals):
-            surf_id = int(surf_id)
-            surface_sense[surf_id] = {}
-            if sense[0] != 0:  # Forward sense volume
-                surface_sense[surf_id][int(sense[0])] = 1
-            if sense[1] != 0:  # Reverse sense volume
-                surface_sense[surf_id][int(sense[1])] = -1
-
-        # Find volume entities and their child surfaces
-        volume_data = {}  # vol_entity -> {'gid': int, 'surfaces': [(surf_entity, sense_sign), ...]}
-
-        for i in range(len(sets_list)):
-            entity_id = base_entity_id + i
-            if cat_lookup.get(entity_id) != "Volume":
-                continue
-
-            vol_gid = int(global_ids[i])
-
-            # Get child surfaces from children array
-            child_start = sets_list[i][2]
-            if child_start < 0:
-                volume_data[entity_id] = {'gid': vol_gid, 'surfaces': []}
-                continue
-
-            child_end = len(children)
-            for j in range(i + 1, len(sets_list)):
-                if sets_list[j][2] > child_start:
-                    child_end = sets_list[j][2]
-                    break
-
-            surfaces = []
-            for surf_entity in children[child_start:child_end]:
-                surf_entity = int(surf_entity)
-                # Get sense sign for this surface relative to this volume
-                sense_sign = surface_sense.get(surf_entity, {}).get(entity_id, 1)
-                surfaces.append((surf_entity, sense_sign))
-
-            volume_data[entity_id] = {'gid': vol_gid, 'surfaces': surfaces}
-
-        # For each volume, get all triangles from its surfaces and calculate volume
-        num_nodes = len(coords)
-        num_triangles = len(triangles)
+        # Build set of volume handles
+        volume_handles = {
+            h
+            for h, cat in categories.items()
+            if cat == "Volume"
+        }
+        volume_handles.update(
+            h for h, dim in geom_dim.items() if dim == 3
+        )
 
         volume_sizes = {}
+        for vol_handle in volume_handles:
+            vol_gid = global_ids.get(vol_handle)
+            if vol_gid is None:
+                continue
 
-        for vol_entity, data in volume_data.items():
-            vol_gid = data['gid']
-            all_tris = []
-            all_signs = []
-
-            for surf_entity, sense_sign in data['surfaces']:
-                # Get triangles for this surface
-                # Since we can't easily decode MOAB's range encoding,
-                # we'll use all triangles and assign them based on GEOM_SENSE_2
-                surf_idx = entity_to_set_idx.get(surf_entity)
-                if surf_idx is None:
-                    continue
-
-                # For now, we need to get triangles another way
-                # Let's collect triangle indices based on the contents structure
-                pass  # We'll handle this below
-
-            volume_sizes[vol_gid] = 0.0
-
-        # Since decoding MOAB's range encoding is complex, fall back to
-        # using all triangles and assigning them based on GEOM_SENSE_2
-        # This approach uses the fact that each triangle belongs to exactly one surface
-
-        # Build triangle -> surface mapping by checking which surface each triangle
-        # is closest to (based on centroid containment) - but this is too complex
-
-        # Instead, let's use pymoab for accurate volume calculation
-        # and return approximate values from h5py
-
-        # Simpler approach: use the bounding box method for approximate volume
-        for vol_entity, data in volume_data.items():
-            vol_gid = data['gid']
-            # Get approximate volume from bounding box (very rough)
-            # This is a placeholder - accurate volume requires proper mesh parsing
-            volume_sizes[vol_gid] = 0.0
+            size = _volume_for_volume_set(
+                vol_handle=vol_handle,
+                sets_by_handle=sets_by_handle,
+                surface_handles=surface_handles,
+                geom_sense=geom_sense,
+                coords=coords,
+                tri_conn0=tri_conn0,
+                tri_start=tri_start,
+                tri_end=tri_end,
+            )
+            volume_sizes[int(vol_gid)] = abs(size)
 
         return volume_sizes
 
@@ -544,3 +792,76 @@ def get_volumes_sizes_from_h5m(
         return _get_volumes_sizes_pymoab(filename)
     else:
         return _get_volumes_sizes_h5py(filename)
+
+
+def set_openmc_material_volumes_from_h5m(
+    materials: Union[List, "openmc.Materials"],
+    filename: str,
+    backend: Literal["h5py", "pymoab"] = "h5py",
+) -> None:
+    """Sets the volume attribute on OpenMC Material objects based on DAGMC geometry.
+
+    This function reads volume and material information from a DAGMC h5m file,
+    then matches materials by name and sets the `volume` attribute on the
+    corresponding OpenMC Material objects.
+
+    If a material name in the DAGMC file appears in multiple volumes, the
+    geometric volumes are summed together.
+
+    Arguments:
+        materials: A list of openmc.Material objects or an openmc.Materials
+            collection. Materials are matched by their `name` attribute.
+        filename: The filename of the DAGMC h5m file.
+        backend: The backend to use for reading the file ("h5py" or "pymoab").
+            Note: "pymoab" backend is required for accurate volume calculations.
+
+    Raises:
+        FileNotFoundError: If the DAGMC file does not exist.
+        ValueError: If multiple OpenMC materials have the same name.
+
+    Example:
+        >>> import openmc
+        >>> steel = openmc.Material(name='steel')
+        >>> water = openmc.Material(name='water')
+        >>> materials = openmc.Materials([steel, water])
+        >>> set_openmc_material_volumes_from_h5m(materials, 'dagmc.h5m')
+        >>> print(steel.volume)  # Volume is now set
+    """
+    if not Path(filename).is_file():
+        raise FileNotFoundError(f"filename provided ({filename}) does not exist")
+
+    # Check for duplicate material names in the provided materials
+    material_names = [mat.name for mat in materials]
+    seen_names = {}
+    for name in material_names:
+        if name is None:
+            continue
+        if name in seen_names:
+            raise ValueError(
+                f"Multiple OpenMC materials have the same name '{name}'. "
+                "Each material must have a unique name for matching."
+            )
+        seen_names[name] = True
+
+    # Get volume-to-material mapping and volume sizes from DAGMC file
+    vol_mat_mapping = get_volumes_and_materials_from_h5m(
+        filename=filename,
+        remove_prefix=True,
+        backend=backend,
+    )
+    volume_sizes = get_volumes_sizes_from_h5m(
+        filename=filename,
+        backend=backend,
+    )
+
+    # Aggregate volumes by material name (in case same material has multiple volumes)
+    material_volumes = {}
+    for vol_id, mat_name in vol_mat_mapping.items():
+        if mat_name not in material_volumes:
+            material_volumes[mat_name] = 0.0
+        material_volumes[mat_name] += volume_sizes.get(vol_id, 0.0)
+
+    # Set volumes on matching OpenMC materials
+    for mat in materials:
+        if mat.name is not None and mat.name in material_volumes:
+            mat.volume = material_volumes[mat.name]
