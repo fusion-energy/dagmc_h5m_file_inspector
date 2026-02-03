@@ -13,20 +13,10 @@ authors = [
     { name = "The dagmc_h5m_file_inspector Development Team", email = "mail@jshimwell.com" },
 ]
 classifiers = [
-    "Natural Language :: English",
-    "Topic :: Scientific/Engineering",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.8",
-    "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
-    "Programming Language :: Python :: 3.13",
-    "Programming Language :: Python :: 3.14",
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
 ]
-
 [project.urls]
 Homepage = "https://github.com/fusion-energy/dagmc_h5m_file_inspector"
 Source = "https://github.com/fusion-energy/dagmc_h5m_file_inspector"
