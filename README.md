@@ -14,36 +14,13 @@ A minimal Python package that finds the volume ids and the material tags in a
 DAGMC h5m file.
 
 
-# Installation (Conda)
-
-Create a new conda environment and activate it
-```bash
-conda create --name new_env python=3.9
-conda activate new_env
-```
-
-The dagmc-h5m-file-inspector package can be installed with a single conda
-install terminal command.
-
-```bash
-conda install -c fusion-energy -c conda-forge dagmc_h5m_file_inspector
-```
-
-# Installation (Conda + Pip)
+# Installation
 
 The dagmc-h5m-file-inspector package requires pymoab which can be installed
 alongside Moab with a conda install command. Moab is not avialable on pip,
 however it can be installed with Conda.
 
-Create a new conda environment and activate it
 ```bash
-conda create --name new_env python=3.9
-conda activate new_env
-```
-Then install Moab and dagmc-h5m-file-inspector 
-```bash
-conda install -c conda-forge moab
-
 pip install dagmc-h5m-file-inspector
 ```
 
@@ -79,42 +56,3 @@ di.get_volumes_and_materials_from_h5m("dagmc.h5m")
 
 >>> {1: 'steel', 2: 'graveyard'}
 ```
-
-# Command line tool usage
-
-The options for the command line tool can be obtained with ```inspect-dagmc-h5m-file --help```
-
-Print the volume IDs present in a dagmc h5m file to the terminal
-
-```
-inspect-dagmc-h5m-file -i dagmc.h5m -v
->>> Volume IDs =[1, 2]
-```
-
-Print the material tags present in a dagmc h5m file to the terminal
-
-```bash
-inspect-dagmc-h5m-file -i dagmc.h5m -m
->>> Material tags =['steel', 'graveyard']
-```
-
-Print the volume IDs and materials present in a dagmc h5m file to the terminal
-
-```bash
-inspect-dagmc-h5m-file -i dagmc.h5m -b
->>> Volume IDs and material tags=
-     {   1: 'steel',
-         2: 'graveyard'}
-```
-
-Write the volume IDs and materials present in a dagmc h5m file to a txt file
-
-```bash
-inspect-dagmc-h5m-file -i dagmc.h5m -b -o output.txt
->>> writing file output.txt
-```
-
-
-# Aknowledgements
-
-This package is based on a [Python script](https://gist.github.com/gonuke/c36e327e399c7a685cd315c738121c9a) by @gonuke
