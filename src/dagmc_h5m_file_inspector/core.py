@@ -770,7 +770,7 @@ def get_bounding_box_from_h5m(
         return _get_bounding_box_h5py(filename)
 
 
-def get_volumes_sizes_from_h5m(
+def get_volumes_sizes_from_h5m_by_cell_id(
     filename: str,
     backend: Literal["h5py", "pymoab"] = "h5py",
 ) -> dict:
@@ -782,7 +782,7 @@ def get_volumes_sizes_from_h5m(
         backend: the backend to use for reading the file ("h5py" or "pymoab")
 
     Returns:
-        A dictionary mapping volume IDs to their geometric volumes (sizes)
+        A dictionary mapping volume IDs (cell IDs) to their geometric volumes (sizes)
     """
     if not Path(filename).is_file():
         raise FileNotFoundError(f"filename provided ({filename}) does not exist")
@@ -792,6 +792,45 @@ def get_volumes_sizes_from_h5m(
         return _get_volumes_sizes_pymoab(filename)
     else:
         return _get_volumes_sizes_h5py(filename)
+
+
+def get_volumes_sizes_from_h5m_by_material_name(
+    filename: str,
+    backend: Literal["h5py", "pymoab"] = "h5py",
+) -> Dict[str, float]:
+    """Reads in a DAGMC h5m file and calculates the geometric volume
+    for each material, aggregating volumes from all cells with the same material.
+
+    Arguments:
+        filename: the filename of the DAGMC h5m file
+        backend: the backend to use for reading the file ("h5py" or "pymoab")
+
+    Returns:
+        A dictionary mapping material names to their total geometric volumes.
+        If a material is assigned to multiple cells, their volumes are summed.
+    """
+    if not Path(filename).is_file():
+        raise FileNotFoundError(f"filename provided ({filename}) does not exist")
+
+    # Get volume-to-material mapping and volume sizes
+    vol_mat_mapping = get_volumes_and_materials_from_h5m(
+        filename=filename,
+        remove_prefix=True,
+        backend=backend,
+    )
+    volume_sizes = get_volumes_sizes_from_h5m_by_cell_id(
+        filename=filename,
+        backend=backend,
+    )
+
+    # Aggregate volumes by material name
+    material_volumes: Dict[str, float] = {}
+    for vol_id, mat_name in vol_mat_mapping.items():
+        if mat_name not in material_volumes:
+            material_volumes[mat_name] = 0.0
+        material_volumes[mat_name] += volume_sizes.get(vol_id, 0.0)
+
+    return material_volumes
 
 
 def set_openmc_material_volumes_from_h5m(
@@ -843,23 +882,11 @@ def set_openmc_material_volumes_from_h5m(
             )
         seen_names[name] = True
 
-    # Get volume-to-material mapping and volume sizes from DAGMC file
-    vol_mat_mapping = get_volumes_and_materials_from_h5m(
-        filename=filename,
-        remove_prefix=True,
-        backend=backend,
-    )
-    volume_sizes = get_volumes_sizes_from_h5m(
+    # Get volumes aggregated by material name
+    material_volumes = get_volumes_sizes_from_h5m_by_material_name(
         filename=filename,
         backend=backend,
     )
-
-    # Aggregate volumes by material name (in case same material has multiple volumes)
-    material_volumes = {}
-    for vol_id, mat_name in vol_mat_mapping.items():
-        if mat_name not in material_volumes:
-            material_volumes[mat_name] = 0.0
-        material_volumes[mat_name] += volume_sizes.get(vol_id, 0.0)
 
     # Set volumes on matching OpenMC materials
     for mat in materials:

@@ -10,24 +10,23 @@
 
 # dagmc-h5m-file-inspector
 
-A minimal Python package that finds the volume ids and the material tags in a
-DAGMC h5m file.
+A minimal Python package that inspects DAGMC h5m files to extract volume IDs,
+material tags, bounding boxes, and geometric volumes.
 
 
 # Installation
-
-The dagmc-h5m-file-inspector package requires pymoab which can be installed
-alongside Moab with a conda install command. Moab is not avialable on pip,
-however it can be installed with Conda.
 
 ```bash
 pip install dagmc-h5m-file-inspector
 ```
 
+The package uses h5py as the default backend. Optionally, pymoab can be used
+as an alternative backend if installed.
+
 
 # Python API Usage
 
-Finding the volume IDs in a DAGMC h5m file.
+## Finding volume IDs
 
 ```python
 import dagmc_h5m_file_inspector as di
@@ -37,22 +36,93 @@ di.get_volumes_from_h5m("dagmc.h5m")
 >>> [1, 2]
 ```
 
-Finding the material tags in a DAGMC h5m file.
+## Finding material tags
 
 ```python
 import dagmc_h5m_file_inspector as di
 
 di.get_materials_from_h5m("dagmc.h5m")
 
->>> ['steel', 'graveyard']
+>>> ['big_box', 'small_box']
 ```
 
-Finding the volume IDs with their materials present in a DAGMC h5m file.
+## Finding volume IDs with their materials
 
 ```python
 import dagmc_h5m_file_inspector as di
 
 di.get_volumes_and_materials_from_h5m("dagmc.h5m")
 
->>> {1: 'steel', 2: 'graveyard'}
+>>> {1: 'small_box', 2: 'big_box'}
+```
+
+## Getting the bounding box
+
+```python
+import dagmc_h5m_file_inspector as di
+
+lower_left, upper_right = di.get_bounding_box_from_h5m("dagmc.h5m")
+
+>>> lower_left
+array([-5., -10., -10.])
+
+>>> upper_right
+array([25., 10., 10.])
+```
+
+## Getting geometric volume sizes by cell ID
+
+```python
+import dagmc_h5m_file_inspector as di
+
+di.get_volumes_sizes_from_h5m_by_cell_id("dagmc.h5m")
+
+>>> {1: 1000.0, 2: 8000.0}
+```
+
+## Getting geometric volume sizes by material name
+
+```python
+import dagmc_h5m_file_inspector as di
+
+di.get_volumes_sizes_from_h5m_by_material_name("dagmc.h5m")
+
+>>> {'small_box': 1000.0, 'big_box': 8000.0}
+```
+
+## Setting OpenMC material volumes from DAGMC geometry
+
+This function reads the DAGMC file, matches materials by name, and sets the
+`volume` attribute on the corresponding OpenMC Material objects.
+
+```python
+import openmc
+import dagmc_h5m_file_inspector as di
+
+# Create OpenMC materials with names matching the DAGMC file
+small_box = openmc.Material(name='small_box')
+big_box = openmc.Material(name='big_box')
+materials = openmc.Materials([small_box, big_box])
+
+# Set volumes from DAGMC geometry
+di.set_openmc_material_volumes_from_h5m(materials, "dagmc.h5m")
+
+>>> small_box.volume
+1000.0
+
+>>> big_box.volume
+8000.0
+```
+
+## Using the pymoab backend
+
+All functions support an optional `backend` parameter. The default is `"h5py"`,
+but `"pymoab"` can be used if pymoab is installed:
+
+```python
+import dagmc_h5m_file_inspector as di
+
+di.get_volumes_from_h5m("dagmc.h5m", backend="pymoab")
+
+>>> [1, 2]
 ```

@@ -103,11 +103,11 @@ def test_bounding_box(touching_boxes, backend):
 
 
 @pytest.mark.parametrize("backend", ["h5py", "pymoab"])
-def test_volume_sizes(touching_boxes, backend):
+def test_volume_sizes_by_cell_id(touching_boxes, backend):
     """Extracts the geometric volumes from a dagmc file and checks they
     match the expected cube volumes"""
 
-    volume_sizes = di.get_volumes_sizes_from_h5m(
+    volume_sizes = di.get_volumes_sizes_from_h5m_by_cell_id(
         filename=touching_boxes['filename'],
         backend=backend,
     )
@@ -118,6 +118,27 @@ def test_volume_sizes(touching_boxes, backend):
         assert vol_id in volume_sizes
         # Allow 5% tolerance for mesh discretization
         assert abs(volume_sizes[vol_id] - expected_size) / expected_size < 0.05
+
+
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+def test_volume_sizes_by_material_name(touching_boxes, backend):
+    """Extracts the geometric volumes by material name from a dagmc file"""
+
+    volume_sizes = di.get_volumes_sizes_from_h5m_by_material_name(
+        filename=touching_boxes['filename'],
+        backend=backend,
+    )
+
+    # small_box is volume 1 (1000), big_box is volume 2 (8000)
+    expected = {
+        'small_box': touching_boxes['expected_volume_sizes'][1],
+        'big_box': touching_boxes['expected_volume_sizes'][2],
+    }
+
+    for mat_name, expected_size in expected.items():
+        assert mat_name in volume_sizes
+        # Allow 5% tolerance for mesh discretization
+        assert abs(volume_sizes[mat_name] - expected_size) / expected_size < 0.05
 
 
 # ============================================================================
@@ -175,11 +196,11 @@ def test_separated_bounding_box(separated_boxes, backend):
 
 
 @pytest.mark.parametrize("backend", ["h5py", "pymoab"])
-def test_separated_volume_sizes(separated_boxes, backend):
+def test_separated_volume_sizes_by_cell_id(separated_boxes, backend):
     """Extracts the geometric volumes from separated boxes and checks they
     match the expected cube volumes"""
 
-    volume_sizes = di.get_volumes_sizes_from_h5m(
+    volume_sizes = di.get_volumes_sizes_from_h5m_by_cell_id(
         filename=separated_boxes['filename'],
         backend=backend,
     )
@@ -190,6 +211,125 @@ def test_separated_volume_sizes(separated_boxes, backend):
         assert vol_id in volume_sizes
         # Allow 5% tolerance for mesh discretization
         assert abs(volume_sizes[vol_id] - expected_size) / expected_size < 0.05
+
+
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+def test_separated_volume_sizes_by_material_name(separated_boxes, backend):
+    """Extracts the geometric volumes by material name from separated boxes"""
+
+    volume_sizes = di.get_volumes_sizes_from_h5m_by_material_name(
+        filename=separated_boxes['filename'],
+        backend=backend,
+    )
+
+    # box_a is volume 1, box_b is volume 2
+    expected = {
+        'box_a': separated_boxes['expected_volume_sizes'][1],
+        'box_b': separated_boxes['expected_volume_sizes'][2],
+    }
+
+    for mat_name, expected_size in expected.items():
+        assert mat_name in volume_sizes
+        # Allow 5% tolerance for mesh discretization
+        assert abs(volume_sizes[mat_name] - expected_size) / expected_size < 0.05
+
+
+# ============================================================================
+# Tests for h5py and pymoab backend consistency
+# ============================================================================
+
+# Files where h5py and pymoab produce consistent results
+H5M_TEST_FILES_CONSISTENT = [
+    "tests/circulartorus.h5m",
+    "tests/cuboid.h5m",
+    "tests/cylinder.h5m",
+    "tests/ellipticaltorus.h5m",
+    "tests/nestedcylinder.h5m",
+    "tests/sphere.h5m",
+    "tests/tetrahedral.h5m",
+    "tests/two_tetrahedrons.h5m",
+]
+
+# Files where pymoab has known issues with volume calculation
+# (h5py uses GEOM_SENSE_2 for proper signed volume, pymoab doesn't)
+H5M_TEST_FILES_PYMOAB_ISSUES = [
+    "tests/nestedsphere.h5m",
+    "tests/oktavian.h5m",
+    "tests/simpletokamak.h5m",
+    "tests/twotouchingcuboids.h5m",
+]
+
+
+@pytest.mark.parametrize("filename", H5M_TEST_FILES_CONSISTENT)
+def test_volume_sizes_h5py_pymoab_consistency(filename):
+    """Verify h5py and pymoab backends produce the same volume calculations"""
+
+    h5py_volumes = di.get_volumes_sizes_from_h5m_by_cell_id(filename, backend="h5py")
+    pymoab_volumes = di.get_volumes_sizes_from_h5m_by_cell_id(filename, backend="pymoab")
+
+    # Check same volume IDs are returned
+    assert set(h5py_volumes.keys()) == set(pymoab_volumes.keys()), \
+        f"Volume IDs differ: h5py={set(h5py_volumes.keys())}, pymoab={set(pymoab_volumes.keys())}"
+
+    # Check volumes match within tolerance
+    for vol_id in h5py_volumes:
+        h5py_vol = h5py_volumes[vol_id]
+        pymoab_vol = pymoab_volumes[vol_id]
+
+        # Use relative tolerance for non-zero volumes
+        if pymoab_vol > 1e-10:
+            rel_diff = abs(h5py_vol - pymoab_vol) / pymoab_vol
+            assert rel_diff < 0.01, \
+                f"Volume {vol_id} differs: h5py={h5py_vol}, pymoab={pymoab_vol}, rel_diff={rel_diff}"
+        else:
+            # For near-zero volumes, use absolute tolerance
+            assert abs(h5py_vol - pymoab_vol) < 1e-6, \
+                f"Volume {vol_id} differs: h5py={h5py_vol}, pymoab={pymoab_vol}"
+
+
+@pytest.mark.parametrize("filename", H5M_TEST_FILES_CONSISTENT)
+def test_volume_sizes_by_material_h5py_pymoab_consistency(filename):
+    """Verify h5py and pymoab backends produce the same volume calculations by material"""
+
+    h5py_volumes = di.get_volumes_sizes_from_h5m_by_material_name(filename, backend="h5py")
+    pymoab_volumes = di.get_volumes_sizes_from_h5m_by_material_name(filename, backend="pymoab")
+
+    # Check same material names are returned
+    assert set(h5py_volumes.keys()) == set(pymoab_volumes.keys()), \
+        f"Material names differ: h5py={set(h5py_volumes.keys())}, pymoab={set(pymoab_volumes.keys())}"
+
+    # Check volumes match within tolerance
+    for mat_name in h5py_volumes:
+        h5py_vol = h5py_volumes[mat_name]
+        pymoab_vol = pymoab_volumes[mat_name]
+
+        # Use relative tolerance for non-zero volumes
+        if pymoab_vol > 1e-10:
+            rel_diff = abs(h5py_vol - pymoab_vol) / pymoab_vol
+            assert rel_diff < 0.01, \
+                f"Material '{mat_name}' differs: h5py={h5py_vol}, pymoab={pymoab_vol}, rel_diff={rel_diff}"
+        else:
+            # For near-zero volumes, use absolute tolerance
+            assert abs(h5py_vol - pymoab_vol) < 1e-6, \
+                f"Material '{mat_name}' differs: h5py={h5py_vol}, pymoab={pymoab_vol}"
+
+
+@pytest.mark.parametrize("filename", H5M_TEST_FILES_PYMOAB_ISSUES)
+def test_volume_sizes_h5py_runs_on_complex_geometries(filename):
+    """Verify h5py backend can process complex geometries where pymoab has issues.
+
+    The h5py backend properly uses GEOM_SENSE_2 for signed volume calculation,
+    while the pymoab backend may not correctly handle shared surfaces in
+    complex nested/touching geometries.
+    """
+    h5py_volumes = di.get_volumes_sizes_from_h5m_by_cell_id(filename, backend="h5py")
+
+    # Just verify h5py returns valid volumes
+    assert len(h5py_volumes) > 0
+    for vol_id, volume in h5py_volumes.items():
+        assert isinstance(vol_id, int)
+        assert isinstance(volume, float)
+        assert volume >= 0
 
 
 # ============================================================================
