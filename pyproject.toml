@@ -18,6 +18,7 @@ classifiers = [
 ]
 dependencies = [
     "h5py",
+    "numpy",
 ]
 
 [project.urls]
