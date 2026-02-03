@@ -53,21 +53,30 @@ def main():
         required=False,
     )
 
+    parser.add_argument(
+        "--backend",
+        type=str,
+        choices=["h5py", "pymoab"],
+        default="h5py",
+        help="Backend to use for reading h5m files (default: h5py)",
+        required=False,
+    )
+
     args = parser.parse_args()
 
     volumes = None
     if args.volumes:
-        volumes = get_volumes_from_h5m(filename=args.input)
+        volumes = get_volumes_from_h5m(filename=args.input, backend=args.backend)
         print(f"\nVolume IDs ={volumes}")
 
     materials = None
     if args.materials:
-        materials = get_materials_from_h5m(filename=args.input)
+        materials = get_materials_from_h5m(filename=args.input, backend=args.backend)
         print(f"\nMaterial tags ={materials}")
 
     both = None
     if args.both:
-        both = get_volumes_and_materials_from_h5m(filename=args.input)
+        both = get_volumes_and_materials_from_h5m(filename=args.input, backend=args.backend)
         pp = pprint.PrettyPrinter(indent=4)
         print("\nVolume IDs and material tags=")
         pp.pprint(both)

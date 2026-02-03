@@ -29,6 +29,9 @@ Tracker = "https://github.com/fusion-energy/dagmc_h5m_file_inspector/issues"
 inspect-dagmc-h5m-file = "dagmc_h5m_file_inspector.cli:main"
 
 [project.optional-dependencies]
+pymoab = [
+    "pymoab",
+]
 tests = [
     "pytest >= 5.4.3",
     "requests",
