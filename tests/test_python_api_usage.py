@@ -1,3 +1,5 @@
+import os
+
 import pytest
 import numpy as np
 import openmc
@@ -532,13 +534,19 @@ H5M_TEST_FILES_OPENMC_STOCHASTIC = [
 
 
 @pytest.mark.parametrize("filename", H5M_TEST_FILES_OPENMC_STOCHASTIC)
+@pytest.mark.skipif(
+    os.environ.get("CI") == "true" or os.environ.get("GITHUB_ACTIONS") == "true",
+    reason="OpenMC stochastic volume tests skipped in CI (requires cross sections data)"
+)
 def test_volume_sizes_openmc_stochastic_consistency(filename, tmp_path):
     """Verify our volume calculations match OpenMC stochastic results.
 
     OpenMC uses Monte Carlo sampling to estimate volumes, so we allow
     a larger tolerance (5%) to account for statistical noise.
+
+    This test is skipped in CI environments as it requires OpenMC cross
+    sections data to be installed.
     """
-    import os
     from pathlib import Path
 
     # Convert to absolute path before changing directories
