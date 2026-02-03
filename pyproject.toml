@@ -29,6 +29,8 @@ tests = [
     "pytest >= 5.4.3",
     "requests",
     "pytest-cov",
+    "cad-to-dagmc",
+    "cadquery",
 ]
 
 [tool.setuptools.packages.find]
@@ -36,6 +38,3 @@ where = ["src"]
 
 [tool.setuptools_scm]
 write_to = "src/dagmc_h5m_file_inspector/_version.py"
-
-[tool.flake8]
-per-file-ignores = ["__init__.py:F401"]
