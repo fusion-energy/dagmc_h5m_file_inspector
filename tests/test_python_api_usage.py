@@ -642,3 +642,206 @@ def test_volume_sizes_openmc_stochastic_consistency(filename, tmp_path):
                         f"Material '{mat_name}' volume differs: h5py={h5py_vol}, openmc={openmc_vol}, rel_diff={rel_diff}"
     finally:
         os.chdir(original_dir)
+
+
+# ============================================================================
+# Tests for get_triangle_conn_and_coords_by_volume
+# ============================================================================
+
+
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+def test_triangle_conn_and_coords_basic(touching_boxes, backend):
+    """Test that triangle connectivity and coordinates are returned for each volume"""
+
+    data = di.get_triangle_conn_and_coords_by_volume(
+        filename=touching_boxes['filename'],
+        backend=backend,
+    )
+
+    # Should have data for all expected volumes
+    assert set(data.keys()) == set(touching_boxes['volumes'])
+
+    for vol_id in touching_boxes['volumes']:
+        connectivity, coordinates = data[vol_id]
+
+        # Connectivity should be Mx3 array of integers
+        assert connectivity.ndim == 2
+        assert connectivity.shape[1] == 3
+        assert connectivity.dtype in [np.int64, np.int32, np.uint64]
+
+        # Coordinates should be Nx3 array of floats
+        assert coordinates.ndim == 2
+        assert coordinates.shape[1] == 3
+        assert coordinates.dtype == np.float64
+
+        # All connectivity indices should be valid
+        assert connectivity.min() >= 0
+        assert connectivity.max() < len(coordinates)
+
+        # Should have at least some triangles (boxes have 12 triangles minimum)
+        assert len(connectivity) >= 12
+
+
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+def test_triangle_conn_and_coords_separated_boxes(separated_boxes, backend):
+    """Test triangle connectivity and coordinates for separated boxes geometry"""
+
+    data = di.get_triangle_conn_and_coords_by_volume(
+        filename=separated_boxes['filename'],
+        backend=backend,
+    )
+
+    # Should have data for all expected volumes
+    assert set(data.keys()) == set(separated_boxes['volumes'])
+
+    for vol_id in separated_boxes['volumes']:
+        connectivity, coordinates = data[vol_id]
+
+        # Basic shape checks
+        assert connectivity.ndim == 2
+        assert connectivity.shape[1] == 3
+        assert coordinates.ndim == 2
+        assert coordinates.shape[1] == 3
+
+        # Connectivity indices should be valid
+        assert connectivity.min() >= 0
+        assert connectivity.max() < len(coordinates)
+
+
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+def test_triangle_conn_and_coords_file_not_found(backend):
+    """Test that missing file raises FileNotFoundError"""
+
+    with pytest.raises(FileNotFoundError):
+        di.get_triangle_conn_and_coords_by_volume(
+            filename='nonexistent_file.h5m',
+            backend=backend,
+        )
+
+
+@pytest.mark.parametrize("filename", H5M_TEST_FILES)
+def test_triangle_conn_and_coords_h5py_pymoab_consistency(filename):
+    """Verify h5py and pymoab backends return equivalent triangle data"""
+
+    h5py_data = di.get_triangle_conn_and_coords_by_volume(filename, backend="h5py")
+    pymoab_data = di.get_triangle_conn_and_coords_by_volume(filename, backend="pymoab")
+
+    # Same volume IDs should be returned
+    assert set(h5py_data.keys()) == set(pymoab_data.keys()), \
+        f"Volume IDs differ: h5py={set(h5py_data.keys())}, pymoab={set(pymoab_data.keys())}"
+
+    for vol_id in h5py_data:
+        h5py_conn, h5py_coords = h5py_data[vol_id]
+        pymoab_conn, pymoab_coords = pymoab_data[vol_id]
+
+        # Same number of triangles
+        assert len(h5py_conn) == len(pymoab_conn), \
+            f"Volume {vol_id}: triangle count differs - h5py={len(h5py_conn)}, pymoab={len(pymoab_conn)}"
+
+        # Same number of unique vertices
+        assert len(h5py_coords) == len(pymoab_coords), \
+            f"Volume {vol_id}: vertex count differs - h5py={len(h5py_coords)}, pymoab={len(pymoab_coords)}"
+
+        # Coordinates should be the same (may be in different order)
+        # Sort coordinates for comparison
+        h5py_sorted = np.sort(h5py_coords, axis=0)
+        pymoab_sorted = np.sort(pymoab_coords, axis=0)
+        np.testing.assert_allclose(h5py_sorted, pymoab_sorted, rtol=1e-10, atol=1e-10,
+            err_msg=f"Volume {vol_id}: coordinates differ")
+
+
+@pytest.mark.parametrize("filename", H5M_TEST_FILES)
+def test_triangle_conn_and_coords_pydagmc_consistency(filename):
+    """Verify our triangle data matches pydagmc results"""
+    import warnings
+    import pydagmc
+
+    # Get data from our implementation
+    h5py_data = di.get_triangle_conn_and_coords_by_volume(filename, backend="h5py")
+
+    # Get data from pydagmc
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        dag_model = pydagmc.Model(filename)
+
+    for vol_id, volume in dag_model.volumes_by_id.items():
+        vol_id = int(vol_id)
+
+        # Get pydagmc triangle data (with compress=True for unique vertices)
+        pydagmc_conn, pydagmc_coords = volume.get_triangle_conn_and_coords(compress=True)
+
+        # Get our data
+        assert vol_id in h5py_data, f"Volume {vol_id} missing from our implementation"
+        our_conn, our_coords = h5py_data[vol_id]
+
+        # Same number of triangles
+        assert len(our_conn) == len(pydagmc_conn), \
+            f"Volume {vol_id}: triangle count differs - ours={len(our_conn)}, pydagmc={len(pydagmc_conn)}"
+
+        # Same number of unique vertices
+        assert len(our_coords) == len(pydagmc_coords), \
+            f"Volume {vol_id}: vertex count differs - ours={len(our_coords)}, pydagmc={len(pydagmc_coords)}"
+
+        # Verify the actual geometry is equivalent by checking:
+        # 1. The set of unique coordinates should match
+        # 2. The triangles should form the same mesh
+
+        # Sort coordinates and compare
+        our_sorted = np.sort(our_coords, axis=0)
+        pydagmc_sorted = np.sort(pydagmc_coords, axis=0)
+        np.testing.assert_allclose(our_sorted, pydagmc_sorted, rtol=1e-10, atol=1e-10,
+            err_msg=f"Volume {vol_id}: coordinates differ from pydagmc")
+
+        # Verify triangles reference valid vertices and form same geometry
+        # by comparing the actual 3D coordinates of each triangle's vertices
+        our_tri_coords = our_coords[our_conn]  # Shape: (n_triangles, 3, 3)
+        pydagmc_tri_coords = pydagmc_coords[pydagmc_conn]
+
+        # Sort triangles for comparison (triangles may be in different order)
+        # Sort each triangle's vertices, then sort all triangles
+        our_tri_sorted = np.sort(our_tri_coords.reshape(-1, 9), axis=1)
+        our_tri_sorted = our_tri_sorted[np.lexsort(our_tri_sorted.T)]
+
+        pydagmc_tri_sorted = np.sort(pydagmc_tri_coords.reshape(-1, 9), axis=1)
+        pydagmc_tri_sorted = pydagmc_tri_sorted[np.lexsort(pydagmc_tri_sorted.T)]
+
+        np.testing.assert_allclose(our_tri_sorted, pydagmc_tri_sorted, rtol=1e-10, atol=1e-10,
+            err_msg=f"Volume {vol_id}: triangle geometry differs from pydagmc")
+
+
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+def test_triangle_conn_and_coords_mesh_validity(touching_boxes, backend):
+    """Test that the returned mesh data can be used to create valid PyVista meshes"""
+
+    data = di.get_triangle_conn_and_coords_by_volume(
+        filename=touching_boxes['filename'],
+        backend=backend,
+    )
+
+    try:
+        import pyvista as pv
+        HAS_PYVISTA = True
+    except ImportError:
+        HAS_PYVISTA = False
+
+    if not HAS_PYVISTA:
+        pytest.skip("pyvista not installed")
+
+    for vol_id in touching_boxes['volumes']:
+        connectivity, coordinates = data[vol_id]
+
+        # Convert to PyVista format (prepend 3 to each row)
+        n_triangles = connectivity.shape[0]
+        faces = np.hstack([
+            np.full((n_triangles, 1), 3, dtype=np.int64),
+            connectivity
+        ]).flatten()
+
+        # Create PyVista mesh - this should not raise an error
+        mesh = pv.PolyData(coordinates, faces)
+
+        # Mesh should have the correct number of cells (triangles)
+        assert mesh.n_cells == n_triangles
+
+        # Mesh should have the correct number of points
+        assert mesh.n_points == len(coordinates)
