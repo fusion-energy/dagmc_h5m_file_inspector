@@ -114,6 +114,29 @@ di.set_openmc_material_volumes_from_h5m(materials, "dagmc.h5m")
 8000.0
 ```
 
+## Getting triangle connectivity and coordinates for each volume
+
+This function extracts the triangle mesh data for each volume, returning the
+connectivity (vertex indices) and coordinates (3D points) needed for visualization
+or mesh processing.
+
+```python
+import dagmc_h5m_file_inspector as di
+
+data = di.get_triangle_conn_and_coords_by_volume("dagmc.h5m")
+
+>>> data
+{1: (array([[0, 1, 2], [0, 2, 3], ...]), array([[0., 0., 0.], [10., 0., 0.], ...])),
+ 2: (array([[0, 1, 2], [0, 2, 3], ...]), array([[-5., -10., -10.], [25., -10., -10.], ...]))}
+
+# Access data for a specific volume
+connectivity, coordinates = data[1]
+>>> connectivity.shape
+(12, 3)  # 12 triangles, each with 3 vertex indices
+>>> coordinates.shape
+(8, 3)   # 8 unique vertices, each with x, y, z coordinates
+```
+
 ## Using the pymoab backend
 
 All functions support an optional `backend` parameter. The default is `"h5py"`,
