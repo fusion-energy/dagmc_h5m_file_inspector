@@ -415,7 +415,7 @@ def _volume_for_volume_set(
     return total
 
 
-def _get_volumes_sizes_h5py(filename: str) -> dict:
+def _get_volumes_h5py(filename: str) -> dict:
     """Get geometric volume sizes for each volume ID using h5py backend.
 
     Uses the parent-child relationships (Volume -> Surfaces) and GEOM_SENSE_2
@@ -783,7 +783,7 @@ def _get_triangle_conn_and_coords_pymoab(filename: str) -> Dict[int, Tuple[np.nd
     return result
 
 
-def _get_volumes_sizes_pymoab(filename: str) -> dict:
+def _get_volumes_pymoab(filename: str) -> dict:
     """Get geometric volume sizes for each volume ID using pymoab backend.
 
     Uses GEOM_SENSE_2 tag to determine surface orientation relative to each
@@ -976,7 +976,7 @@ def get_bounding_box_from_h5m(
         return _get_bounding_box_h5py(filename)
 
 
-def get_volumes_sizes_from_h5m_by_cell_id(
+def get_volumes_from_h5m_by_cell_id(
     filename: str,
     backend: Literal["h5py", "pymoab"] = "h5py",
 ) -> dict:
@@ -995,12 +995,12 @@ def get_volumes_sizes_from_h5m_by_cell_id(
 
     if backend == "pymoab":
         _check_pymoab_available()
-        return _get_volumes_sizes_pymoab(filename)
+        return _get_volumes_pymoab(filename)
     else:
-        return _get_volumes_sizes_h5py(filename)
+        return _get_volumes_h5py(filename)
 
 
-def get_volumes_sizes_from_h5m_by_material_name(
+def get_volumes_from_h5m_by_material_name(
     filename: str,
     backend: Literal["h5py", "pymoab"] = "h5py",
 ) -> Dict[str, float]:
@@ -1024,7 +1024,7 @@ def get_volumes_sizes_from_h5m_by_material_name(
         remove_prefix=True,
         backend=backend,
     )
-    volume_sizes = get_volumes_sizes_from_h5m_by_cell_id(
+    volume_sizes = get_volumes_from_h5m_by_cell_id(
         filename=filename,
         backend=backend,
     )
@@ -1039,7 +1039,7 @@ def get_volumes_sizes_from_h5m_by_material_name(
     return material_volumes
 
 
-def get_volumes_sizes_from_h5m_by_cell_id_and_material_name(
+def get_volumes_from_h5m_by_cell_id_and_material_name(
     filename: str,
     backend: Literal["h5py", "pymoab"] = "h5py",
 ) -> Dict[Tuple[int, str], float]:
@@ -1062,7 +1062,7 @@ def get_volumes_sizes_from_h5m_by_cell_id_and_material_name(
         remove_prefix=True,
         backend=backend,
     )
-    volume_sizes = get_volumes_sizes_from_h5m_by_cell_id(
+    volume_sizes = get_volumes_from_h5m_by_cell_id(
         filename=filename,
         backend=backend,
     )
@@ -1125,7 +1125,7 @@ def set_openmc_material_volumes_from_h5m(
         seen_names[name] = True
 
     # Get volumes aggregated by material name
-    material_volumes = get_volumes_sizes_from_h5m_by_material_name(
+    material_volumes = get_volumes_from_h5m_by_material_name(
         filename=filename,
         backend=backend,
     )
