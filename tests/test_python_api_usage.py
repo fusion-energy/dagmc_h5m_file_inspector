@@ -151,6 +151,27 @@ def test_volume_sizes_by_material_name(touching_boxes, backend):
         assert abs(volume_sizes[mat_name] - expected_size) / expected_size < 0.05
 
 
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+def test_volume_sizes_by_cell_id_and_material_name(touching_boxes, backend):
+    """Extracts the geometric volumes by cell ID and material name from a dagmc file"""
+
+    volume_sizes = di.get_volumes_sizes_from_h5m_by_cell_id_and_material_name(
+        filename=touching_boxes['filename'],
+        backend=backend,
+    )
+
+    # small_box is volume 1 (1000), big_box is volume 2 (8000)
+    expected = {
+        (1, 'small_box'): touching_boxes['expected_volume_sizes'][1],
+        (2, 'big_box'): touching_boxes['expected_volume_sizes'][2],
+    }
+
+    for key, expected_size in expected.items():
+        assert key in volume_sizes
+        # Allow 5% tolerance for mesh discretization
+        assert abs(volume_sizes[key] - expected_size) / expected_size < 0.05
+
+
 # ============================================================================
 # Tests for separated boxes geometry
 # ============================================================================
@@ -242,6 +263,27 @@ def test_separated_volume_sizes_by_material_name(separated_boxes, backend):
         assert mat_name in volume_sizes
         # Allow 5% tolerance for mesh discretization
         assert abs(volume_sizes[mat_name] - expected_size) / expected_size < 0.05
+
+
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+def test_separated_volume_sizes_by_cell_id_and_material_name(separated_boxes, backend):
+    """Extracts the geometric volumes by cell ID and material name from separated boxes"""
+
+    volume_sizes = di.get_volumes_sizes_from_h5m_by_cell_id_and_material_name(
+        filename=separated_boxes['filename'],
+        backend=backend,
+    )
+
+    # box_a is volume 1, box_b is volume 2
+    expected = {
+        (1, 'box_a'): separated_boxes['expected_volume_sizes'][1],
+        (2, 'box_b'): separated_boxes['expected_volume_sizes'][2],
+    }
+
+    for key, expected_size in expected.items():
+        assert key in volume_sizes
+        # Allow 5% tolerance for mesh discretization
+        assert abs(volume_sizes[key] - expected_size) / expected_size < 0.05
 
 
 # ============================================================================
