@@ -117,7 +117,7 @@ def test_volume_sizes_by_cell_id(touching_boxes, backend):
     """Extracts the geometric volumes from a dagmc file and checks they
     match the expected cube volumes"""
 
-    volume_sizes = di.get_volumes_sizes_from_h5m_by_cell_id(
+    volume_sizes = di.get_volumes_from_h5m_by_cell_id(
         filename=touching_boxes['filename'],
         backend=backend,
     )
@@ -134,7 +134,7 @@ def test_volume_sizes_by_cell_id(touching_boxes, backend):
 def test_volume_sizes_by_material_name(touching_boxes, backend):
     """Extracts the geometric volumes by material name from a dagmc file"""
 
-    volume_sizes = di.get_volumes_sizes_from_h5m_by_material_name(
+    volume_sizes = di.get_volumes_from_h5m_by_material_name(
         filename=touching_boxes['filename'],
         backend=backend,
     )
@@ -155,7 +155,7 @@ def test_volume_sizes_by_material_name(touching_boxes, backend):
 def test_volume_sizes_by_cell_id_and_material_name(touching_boxes, backend):
     """Extracts the geometric volumes by cell ID and material name from a dagmc file"""
 
-    volume_sizes = di.get_volumes_sizes_from_h5m_by_cell_id_and_material_name(
+    volume_sizes = di.get_volumes_from_h5m_by_cell_id_and_material_name(
         filename=touching_boxes['filename'],
         backend=backend,
     )
@@ -231,7 +231,7 @@ def test_separated_volume_sizes_by_cell_id(separated_boxes, backend):
     """Extracts the geometric volumes from separated boxes and checks they
     match the expected cube volumes"""
 
-    volume_sizes = di.get_volumes_sizes_from_h5m_by_cell_id(
+    volume_sizes = di.get_volumes_from_h5m_by_cell_id(
         filename=separated_boxes['filename'],
         backend=backend,
     )
@@ -248,7 +248,7 @@ def test_separated_volume_sizes_by_cell_id(separated_boxes, backend):
 def test_separated_volume_sizes_by_material_name(separated_boxes, backend):
     """Extracts the geometric volumes by material name from separated boxes"""
 
-    volume_sizes = di.get_volumes_sizes_from_h5m_by_material_name(
+    volume_sizes = di.get_volumes_from_h5m_by_material_name(
         filename=separated_boxes['filename'],
         backend=backend,
     )
@@ -269,7 +269,7 @@ def test_separated_volume_sizes_by_material_name(separated_boxes, backend):
 def test_separated_volume_sizes_by_cell_id_and_material_name(separated_boxes, backend):
     """Extracts the geometric volumes by cell ID and material name from separated boxes"""
 
-    volume_sizes = di.get_volumes_sizes_from_h5m_by_cell_id_and_material_name(
+    volume_sizes = di.get_volumes_from_h5m_by_cell_id_and_material_name(
         filename=separated_boxes['filename'],
         backend=backend,
     )
@@ -345,8 +345,8 @@ def test_volumes_and_materials_h5py_pymoab_consistency(filename):
 def test_volume_sizes_h5py_pymoab_consistency(filename):
     """Verify h5py and pymoab backends produce the same volume calculations"""
 
-    h5py_volumes = di.get_volumes_sizes_from_h5m_by_cell_id(filename, backend="h5py")
-    pymoab_volumes = di.get_volumes_sizes_from_h5m_by_cell_id(filename, backend="pymoab")
+    h5py_volumes = di.get_volumes_from_h5m_by_cell_id(filename, backend="h5py")
+    pymoab_volumes = di.get_volumes_from_h5m_by_cell_id(filename, backend="pymoab")
 
     # Check same volume IDs are returned
     assert set(h5py_volumes.keys()) == set(pymoab_volumes.keys()), \
@@ -372,8 +372,8 @@ def test_volume_sizes_h5py_pymoab_consistency(filename):
 def test_volume_sizes_by_material_h5py_pymoab_consistency(filename):
     """Verify h5py and pymoab backends produce the same volume calculations by material"""
 
-    h5py_volumes = di.get_volumes_sizes_from_h5m_by_material_name(filename, backend="h5py")
-    pymoab_volumes = di.get_volumes_sizes_from_h5m_by_material_name(filename, backend="pymoab")
+    h5py_volumes = di.get_volumes_from_h5m_by_material_name(filename, backend="h5py")
+    pymoab_volumes = di.get_volumes_from_h5m_by_material_name(filename, backend="pymoab")
 
     # Check same material names are returned
     assert set(h5py_volumes.keys()) == set(pymoab_volumes.keys()), \
@@ -554,7 +554,7 @@ def test_volume_sizes_pydagmc_consistency(filename):
     import pydagmc
 
     # Get volumes from our implementations
-    h5py_volumes = di.get_volumes_sizes_from_h5m_by_cell_id(filename, backend="h5py")
+    h5py_volumes = di.get_volumes_from_h5m_by_cell_id(filename, backend="h5py")
 
     # Get volumes from pydagmc
     with warnings.catch_warnings():
@@ -617,7 +617,7 @@ def test_volume_sizes_openmc_stochastic_consistency(filename, tmp_path):
     abs_filename = str(Path(filename).resolve())
 
     # Get volumes and materials from our implementation
-    h5py_volumes = di.get_volumes_sizes_from_h5m_by_cell_id(abs_filename, backend="h5py")
+    h5py_volumes = di.get_volumes_from_h5m_by_cell_id(abs_filename, backend="h5py")
     lower, upper = di.get_bounding_box_from_h5m(abs_filename)
     materials_list = di.get_materials_from_h5m(abs_filename, remove_prefix=True)
 
@@ -670,7 +670,7 @@ def test_volume_sizes_openmc_stochastic_consistency(filename, tmp_path):
                     break
 
         # Get our volumes by material name for comparison
-        h5py_volumes_by_mat = di.get_volumes_sizes_from_h5m_by_material_name(abs_filename, backend="h5py")
+        h5py_volumes_by_mat = di.get_volumes_from_h5m_by_material_name(abs_filename, backend="h5py")
 
         # Compare volumes (allow 5% tolerance for stochastic noise)
         for mat_name in h5py_volumes_by_mat:

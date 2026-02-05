@@ -75,7 +75,7 @@ array([25., 10., 10.])
 ```python
 import dagmc_h5m_file_inspector as di
 
-di.get_volumes_sizes_from_h5m_by_cell_id("dagmc.h5m")
+di.get_volumes_from_h5m_by_cell_id("dagmc.h5m")
 
 >>> {1: 1000.0, 2: 8000.0}
 ```
@@ -85,7 +85,7 @@ di.get_volumes_sizes_from_h5m_by_cell_id("dagmc.h5m")
 ```python
 import dagmc_h5m_file_inspector as di
 
-di.get_volumes_sizes_from_h5m_by_material_name("dagmc.h5m")
+di.get_volumes_from_h5m_by_material_name("dagmc.h5m")
 
 >>> {'small_box': 1000.0, 'big_box': 8000.0}
 ```
@@ -95,7 +95,7 @@ di.get_volumes_sizes_from_h5m_by_material_name("dagmc.h5m")
 ```python
 import dagmc_h5m_file_inspector as di
 
-di.get_volumes_sizes_from_h5m_by_cell_id_and_material_name("dagmc.h5m")
+di.get_volumes_from_h5m_by_cell_id_and_material_name("dagmc.h5m")
 
 >>> {(1, 'small_box'): 1000.0, (2, 'big_box'): 8000.0}
 ```
