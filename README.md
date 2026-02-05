@@ -90,6 +90,16 @@ di.get_volumes_sizes_from_h5m_by_material_name("dagmc.h5m")
 >>> {'small_box': 1000.0, 'big_box': 8000.0}
 ```
 
+## Getting geometric volume sizes by cell ID and material name
+
+```python
+import dagmc_h5m_file_inspector as di
+
+di.get_volumes_sizes_from_h5m_by_cell_id_and_material_name("dagmc.h5m")
+
+>>> {(1, 'small_box'): 1000.0, (2, 'big_box'): 8000.0}
+```
+
 ## Setting OpenMC material volumes from DAGMC geometry
 
 This function reads the DAGMC file, matches materials by name, and sets the

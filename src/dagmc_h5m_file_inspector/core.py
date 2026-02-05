@@ -1039,6 +1039,42 @@ def get_volumes_sizes_from_h5m_by_material_name(
     return material_volumes
 
 
+def get_volumes_sizes_from_h5m_by_cell_id_and_material_name(
+    filename: str,
+    backend: Literal["h5py", "pymoab"] = "h5py",
+) -> Dict[Tuple[int, str], float]:
+    """Reads in a DAGMC h5m file and calculates the geometric volume
+    for each cell, returning results keyed by both cell ID and material name.
+
+    Arguments:
+        filename: the filename of the DAGMC h5m file
+        backend: the backend to use for reading the file ("h5py" or "pymoab")
+
+    Returns:
+        A dictionary mapping (cell_id, material_name) tuples to their geometric volumes.
+    """
+    if not Path(filename).is_file():
+        raise FileNotFoundError(f"filename provided ({filename}) does not exist")
+
+    # Get volume-to-material mapping and volume sizes
+    vol_mat_mapping = get_volumes_and_materials_from_h5m(
+        filename=filename,
+        remove_prefix=True,
+        backend=backend,
+    )
+    volume_sizes = get_volumes_sizes_from_h5m_by_cell_id(
+        filename=filename,
+        backend=backend,
+    )
+
+    # Build dictionary with (cell_id, material_name) tuple keys
+    result: Dict[Tuple[int, str], float] = {}
+    for vol_id, mat_name in vol_mat_mapping.items():
+        result[(vol_id, mat_name)] = volume_sizes.get(vol_id, 0.0)
+
+    return result
+
+
 def set_openmc_material_volumes_from_h5m(
     materials: Union[List, "openmc.Materials"],
     filename: str,
