@@ -135,3 +135,5 @@ tests/fusion_example_for_openmc_using_paramak-0.0.1/
 
 # python version file
 _version.py
+
+*.vtkhdf
