@@ -147,6 +147,21 @@ connectivity, coordinates = data[1]
 (8, 3)   # 8 unique vertices, each with x, y, z coordinates
 ```
 
+## Convert h5m file to vtkhdf
+
+Convert DAGMC h5m files to vtkhdf which can be directly opened in Paraview 5.13+.
+
+The resulting Paraview files have color for cell IDs and material tags present within the h5m file.
+
+```python
+import dagmc_h5m_file_inspector as di
+di.convert_h5m_to_vtkhdf(h5m_filename='dagmc.h5m', vtkhdf_filename= 'dagmc.vtkhdf')
+```
+
+![vtk file from dagmc.h5m](dagmc-converted-to-vtkhdf.png)
+
+
+
 ## Using the pymoab backend
 
 All functions support an optional `backend` parameter. The default is `"h5py"`,
