@@ -7,3 +7,4 @@ from .core import get_volumes_from_h5m_by_material_name
 from .core import get_volumes_from_h5m_by_cell_id_and_material_name
 from .core import set_openmc_material_volumes_from_h5m
 from .core import get_triangle_conn_and_coords_by_volume
+from .core import convert_h5m_to_vtkhdf

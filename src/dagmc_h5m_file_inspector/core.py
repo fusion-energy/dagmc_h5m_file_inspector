@@ -1136,6 +1136,152 @@ def set_openmc_material_volumes_from_h5m(
             mat.volume = material_volumes[mat.name]
 
 
+def convert_h5m_to_vtkhdf(
+    h5m_filename: str,
+    vtkhdf_filename: str = "",
+    backend: Literal["h5py", "pymoab"] = "h5py",
+) -> str:
+    """Convert a DAGMC h5m file to a VTKHDF file for visualization in ParaView.
+
+    The output file contains the triangle surface mesh for all volumes, with
+    per-triangle cell_id (DAGMC volume ID) and material_id as cell data. This
+    allows coloring by volume or material in ParaView.
+
+    Arguments:
+        h5m_filename: path to the input DAGMC h5m file
+        vtkhdf_filename: path for the output vtkhdf file. If empty string,
+            uses the same name as h5m_filename with a .vtkhdf extension.
+        backend: backend for reading the h5m file ("h5py" or "pymoab")
+
+    Returns:
+        The path to the written vtkhdf file.
+    """
+    if not Path(h5m_filename).is_file():
+        raise FileNotFoundError(f"filename provided ({h5m_filename}) does not exist")
+
+    if vtkhdf_filename == "":
+        vtkhdf_filename = str(Path(h5m_filename).with_suffix(".vtkhdf"))
+
+    # Get per-volume triangle data
+    per_volume_data = get_triangle_conn_and_coords_by_volume(
+        filename=h5m_filename, backend=backend
+    )
+
+    # Get volume-to-material mapping
+    vol_mat = get_volumes_and_materials_from_h5m(
+        filename=h5m_filename, remove_prefix=True, backend=backend
+    )
+
+    # Build unique material name -> integer index mapping
+    unique_materials = sorted(set(vol_mat.values()))
+    mat_to_int = {name: idx for idx, name in enumerate(unique_materials)}
+
+    # Merge per-volume meshes into global arrays
+    all_points = []
+    all_conn = []
+    all_cell_ids = []
+    all_material_ids = []
+
+    point_offset = 0
+    for vol_id in sorted(per_volume_data.keys()):
+        conn, coords = per_volume_data[vol_id]
+        if len(conn) == 0:
+            continue
+        all_points.append(coords)
+        all_conn.append(conn + point_offset)
+        n_tris = len(conn)
+        all_cell_ids.extend([vol_id] * n_tris)
+        mat_name = vol_mat.get(vol_id, "")
+        all_material_ids.extend([mat_to_int.get(mat_name, -1)] * n_tris)
+        point_offset += len(coords)
+
+    if not all_points:
+        raise ValueError(f"No triangle data found in {h5m_filename}")
+
+    global_points = np.concatenate(all_points, axis=0)
+    global_conn = np.concatenate(all_conn, axis=0)
+
+    _write_vtkhdf(
+        filename=vtkhdf_filename,
+        points=global_points,
+        connectivity=global_conn,
+        cell_ids=np.array(all_cell_ids, dtype=np.int32),
+        material_ids=np.array(all_material_ids, dtype=np.int32),
+        material_names=unique_materials,
+    )
+
+    return vtkhdf_filename
+
+
+def _write_vtkhdf(
+    filename: str,
+    points: np.ndarray,
+    connectivity: np.ndarray,
+    cell_ids: np.ndarray,
+    material_ids: np.ndarray,
+    material_names: List[str],
+) -> None:
+    """Write triangle mesh data to a VTKHDF UnstructuredGrid file.
+
+    Arguments:
+        filename: path for the output file
+        points: vertex coordinates, shape (n_points, 3)
+        connectivity: triangle vertex indices, shape (n_triangles, 3), 0-based
+        cell_ids: DAGMC volume ID per triangle, shape (n_triangles,)
+        material_ids: integer material index per triangle, shape (n_triangles,)
+        material_names: list mapping material_id index to material name string
+    """
+    n_points = points.shape[0]
+    n_cells = connectivity.shape[0]
+    n_connectivity_ids = n_cells * 3
+
+    with h5py.File(filename, "w") as f:
+        root = f.create_group("VTKHDF")
+        root.attrs["Version"] = np.array([2, 1], dtype=np.int64)
+        ascii_type = "UnstructuredGrid".encode("ascii")
+        root.attrs.create(
+            "Type",
+            ascii_type,
+            dtype=h5py.string_dtype("ascii", len(ascii_type)),
+        )
+
+        root.create_dataset(
+            "NumberOfPoints", data=np.array([n_points], dtype=np.int64)
+        )
+        root.create_dataset(
+            "NumberOfCells", data=np.array([n_cells], dtype=np.int64)
+        )
+        root.create_dataset(
+            "NumberOfConnectivityIds",
+            data=np.array([n_connectivity_ids], dtype=np.int64),
+        )
+
+        root.create_dataset("Points", data=points.astype(np.float64))
+        root.create_dataset(
+            "Connectivity", data=connectivity.flatten().astype(np.int64)
+        )
+
+        offsets = np.arange(0, n_cells * 3 + 1, 3, dtype=np.int64)
+        root.create_dataset("Offsets", data=offsets)
+
+        VTK_TRIANGLE = 5
+        root.create_dataset(
+            "Types", data=np.full(n_cells, VTK_TRIANGLE, dtype=np.uint8)
+        )
+
+        cell_data = root.create_group("CellData")
+        cell_data.create_dataset("cell_id", data=cell_ids.astype(np.int32))
+        cell_data.create_dataset(
+            "material_id", data=material_ids.astype(np.int32)
+        )
+
+        field_data = root.create_group("FieldData")
+        dt = h5py.string_dtype()
+        field_data.create_dataset(
+            "material_names", data=material_names, dtype=dt
+        )
+
+
 def get_triangle_conn_and_coords_by_volume(
     filename: str,
     backend: Literal["h5py", "pymoab"] = "h5py",

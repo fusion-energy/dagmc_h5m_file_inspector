@@ -1,5 +1,6 @@
 import os
 
+import h5py
 import pytest
 import numpy as np
 import dagmc_h5m_file_inspector as di
@@ -887,3 +888,189 @@ def test_triangle_conn_and_coords_mesh_validity(touching_boxes, backend):
 
         # Mesh should have the correct number of points
         assert mesh.n_points == len(coordinates)
+
+
+# ============================================================================
+# Tests for convert_h5m_to_vtkhdf
+# ============================================================================
+
+
+def test_convert_h5m_to_vtkhdf_structure(touching_boxes, tmp_path):
+    """Test that the output VTKHDF file has the correct HDF5 structure"""
+
+    output_file = str(tmp_path / "output.vtkhdf")
+    result = di.convert_h5m_to_vtkhdf(
+        h5m_filename=touching_boxes['filename'],
+        vtkhdf_filename=output_file,
+    )
+
+    assert result == output_file
+    assert os.path.isfile(output_file)
+
+    with h5py.File(output_file, "r") as f:
+        # Root group and attributes
+        assert "VTKHDF" in f
+        root = f["VTKHDF"]
+        assert list(root.attrs["Version"]) == [2, 1]
+        type_val = root.attrs["Type"]
+        if isinstance(type_val, bytes):
+            type_val = type_val.decode("ascii")
+        assert type_val == "UnstructuredGrid"
+
+        # Required datasets
+        for ds_name in [
+            "NumberOfPoints", "NumberOfCells", "NumberOfConnectivityIds",
+            "Points", "Connectivity", "Offsets", "Types",
+        ]:
+            assert ds_name in root, f"Missing dataset: {ds_name}"
+
+        # CellData group
+        assert "CellData" in root
+        assert "cell_id" in root["CellData"]
+        assert "material_id" in root["CellData"]
+
+        # FieldData group
+        assert "FieldData" in root
+        assert "material_names" in root["FieldData"]
+
+
+def test_convert_h5m_to_vtkhdf_data_integrity(touching_boxes, tmp_path):
+    """Test that the VTKHDF file contains correct mesh data"""
+
+    output_file = str(tmp_path / "output.vtkhdf")
+    di.convert_h5m_to_vtkhdf(
+        h5m_filename=touching_boxes['filename'],
+        vtkhdf_filename=output_file,
+    )
+
+    # Get expected data from the source
+    per_vol = di.get_triangle_conn_and_coords_by_volume(
+        filename=touching_boxes['filename'],
+    )
+    expected_n_tris = sum(len(c) for c, _ in per_vol.values())
+    expected_n_verts = sum(len(v) for _, v in per_vol.values())
+
+    with h5py.File(output_file, "r") as f:
+        root = f["VTKHDF"]
+
+        n_points = root["NumberOfPoints"][0]
+        n_cells = root["NumberOfCells"][0]
+        n_conn_ids = root["NumberOfConnectivityIds"][0]
+
+        assert n_points == expected_n_verts
+        assert n_cells == expected_n_tris
+        assert n_conn_ids == expected_n_tris * 3
+
+        assert root["Points"].shape == (expected_n_verts, 3)
+        assert root["Connectivity"].shape == (expected_n_tris * 3,)
+        assert root["Offsets"].shape == (expected_n_tris + 1,)
+        assert root["Types"].shape == (expected_n_tris,)
+
+        # All types should be VTK_TRIANGLE = 5
+        assert np.all(root["Types"][()] == 5)
+
+        # Offsets should be [0, 3, 6, 9, ...]
+        expected_offsets = np.arange(0, expected_n_tris * 3 + 1, 3, dtype=np.int64)
+        np.testing.assert_array_equal(root["Offsets"][()], expected_offsets)
+
+        # Connectivity indices should be valid
+        conn = root["Connectivity"][()]
+        assert np.all(conn >= 0)
+        assert np.all(conn < n_points)
+
+
+def test_convert_h5m_to_vtkhdf_cell_data(touching_boxes, tmp_path):
+    """Test that cell_id and material_id arrays are correct"""
+
+    output_file = str(tmp_path / "output.vtkhdf")
+    di.convert_h5m_to_vtkhdf(
+        h5m_filename=touching_boxes['filename'],
+        vtkhdf_filename=output_file,
+    )
+
+    vol_mat = di.get_volumes_and_materials_from_h5m(
+        filename=touching_boxes['filename'],
+    )
+    per_vol = di.get_triangle_conn_and_coords_by_volume(
+        filename=touching_boxes['filename'],
+    )
+
+    with h5py.File(output_file, "r") as f:
+        root = f["VTKHDF"]
+        cell_ids = root["CellData/cell_id"][()]
+        material_ids = root["CellData/material_id"][()]
+        n_cells = root["NumberOfCells"][0]
+
+        assert len(cell_ids) == n_cells
+        assert len(material_ids) == n_cells
+
+        # Check that cell_ids contain the expected volume IDs
+        unique_cell_ids = sorted(set(cell_ids.tolist()))
+        assert unique_cell_ids == sorted(per_vol.keys())
+
+        # Check that the number of triangles per volume matches
+        for vol_id in per_vol:
+            expected_count = len(per_vol[vol_id][0])
+            actual_count = np.sum(cell_ids == vol_id)
+            assert actual_count == expected_count
+
+        # Check material_names in FieldData
+        mat_names = [
+            v.decode("utf-8") if isinstance(v, bytes) else v
+            for v in root["FieldData/material_names"][()]
+        ]
+        unique_materials = sorted(set(vol_mat.values()))
+        assert mat_names == unique_materials
+
+        # Check material_ids are consistent with cell_ids and the mapping
+        mat_to_int = {name: idx for idx, name in enumerate(unique_materials)}
+        for vol_id, mat_name in vol_mat.items():
+            mask = cell_ids == vol_id
+            if np.any(mask):
+                expected_mat_id = mat_to_int[mat_name]
+                assert np.all(material_ids[mask] == expected_mat_id)
+
+
+def test_convert_h5m_to_vtkhdf_default_filename(touching_boxes, tmp_path):
+    """Test that omitting vtkhdf_filename produces correct default"""
+
+    import shutil
+    # Copy h5m into tmp_path so the output goes there
+    src = touching_boxes['filename']
+    dst = str(tmp_path / "dagmc.h5m")
+    shutil.copy2(src, dst)
+
+    result = di.convert_h5m_to_vtkhdf(h5m_filename=dst)
+
+    expected = str(tmp_path / "dagmc.vtkhdf")
+    assert result == expected
+    assert os.path.isfile(expected)
+
+
+def test_convert_h5m_to_vtkhdf_file_not_found():
+    """Test that missing input file raises FileNotFoundError"""
+
+    with pytest.raises(FileNotFoundError):
+        di.convert_h5m_to_vtkhdf(h5m_filename="nonexistent.h5m")
+
+
+@pytest.mark.parametrize("filename", H5M_TEST_FILES)
+def test_convert_h5m_to_vtkhdf_all_geometries(filename, tmp_path):
+    """Test conversion works for all test geometries"""
+
+    output_file = str(tmp_path / "output.vtkhdf")
+    result = di.convert_h5m_to_vtkhdf(
+        h5m_filename=filename,
+        vtkhdf_filename=output_file,
+    )
+
+    assert os.path.isfile(result)
+
+    per_vol = di.get_triangle_conn_and_coords_by_volume(filename=filename)
+    expected_n_tris = sum(len(c) for c, _ in per_vol.values() if len(c) > 0)
+
+    with h5py.File(output_file, "r") as f:
+        root = f["VTKHDF"]
+        assert root["NumberOfCells"][0] == expected_n_tris
+        assert root["CellData/cell_id"].shape == (expected_n_tris,)
+        assert root["CellData/material_id"].shape == (expected_n_tris,)
