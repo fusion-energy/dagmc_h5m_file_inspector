@@ -954,12 +954,18 @@ def get_volumes_and_materials_from_h5m(
 
 def get_bounding_box_from_h5m(
     filename: str,
+    materials: Optional[Union[str, List[str]]] = None,
     backend: Literal["h5py", "pymoab"] = "h5py",
 ) -> Tuple[np.ndarray, np.ndarray]:
     """Reads in a DAGMC h5m file and returns the axis-aligned bounding box.
 
     Arguments:
         filename: the filename of the DAGMC h5m file
+        materials: optional material name or list of material names to filter
+            the bounding box by. If None, the bounding box of all geometry is
+            returned. If a string, the bounding box of that single material is
+            returned. If a list of strings, the combined bounding box of all
+            specified materials is returned.
         backend: the backend to use for reading the file ("h5py" or "pymoab")
 
     Returns:
@@ -969,11 +975,47 @@ def get_bounding_box_from_h5m(
     if not Path(filename).is_file():
         raise FileNotFoundError(f"filename provided ({filename}) does not exist")
 
-    if backend == "pymoab":
-        _check_pymoab_available()
-        return _get_bounding_box_pymoab(filename)
-    else:
-        return _get_bounding_box_h5py(filename)
+    if materials is None:
+        if backend == "pymoab":
+            _check_pymoab_available()
+            return _get_bounding_box_pymoab(filename)
+        else:
+            return _get_bounding_box_h5py(filename)
+
+    if isinstance(materials, str):
+        materials = [materials]
+
+    vol_mat_mapping = get_volumes_and_materials_from_h5m(
+        filename=filename,
+        remove_prefix=True,
+        backend=backend,
+    )
+
+    matching_vol_ids = [
+        vol_id for vol_id, mat_name in vol_mat_mapping.items()
+        if mat_name in materials
+    ]
+
+    if not matching_vol_ids:
+        available = sorted(set(vol_mat_mapping.values()))
+        raise ValueError(
+            f"No volumes found for materials {materials}. "
+            f"Available materials: {available}"
+        )
+
+    vol_data = get_triangle_conn_and_coords_by_volume(
+        filename=filename,
+        backend=backend,
+    )
+
+    all_coords = np.concatenate([
+        vol_data[vol_id][1] for vol_id in matching_vol_ids
+        if vol_id in vol_data and vol_data[vol_id][1].size > 0
+    ])
+
+    lower_left = all_coords.min(axis=0)
+    upper_right = all_coords.max(axis=0)
+    return lower_left, upper_right
 
 
 def get_volumes_from_h5m_by_cell_id(
