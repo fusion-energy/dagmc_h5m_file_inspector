@@ -33,6 +33,10 @@ def create_touching_boxes():
         'expected_volume_sizes': {1: width1 ** 3, 2: width2 ** 3},
         'lower_left': np.array([-5.0, -10.0, -10.0]),
         'upper_right': np.array([25.0, 10.0, 10.0]),
+        'small_box_lower_left': np.array([-5.0, -5.0, -5.0]),
+        'small_box_upper_right': np.array([5.0, 5.0, 5.0]),
+        'big_box_lower_left': np.array([5.0, -10.0, -10.0]),
+        'big_box_upper_right': np.array([25.0, 10.0, 10.0]),
     }
 
 
@@ -66,6 +70,10 @@ def create_separated_boxes():
         'expected_volume_sizes': {1: width ** 3, 2: width ** 3},
         'lower_left': np.array([-5.0, -5.0, -5.0]),
         'upper_right': np.array([20.0, 5.0, 5.0]),
+        'box_a_lower_left': np.array([-5.0, -5.0, -5.0]),
+        'box_a_upper_right': np.array([5.0, 5.0, 5.0]),
+        'box_b_lower_left': np.array([10.0, -5.0, -5.0]),
+        'box_b_upper_right': np.array([20.0, 5.0, 5.0]),
     }
 
 

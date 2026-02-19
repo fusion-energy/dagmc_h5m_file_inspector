@@ -70,6 +70,30 @@ array([-5., -10., -10.])
 array([25., 10., 10.])
 ```
 
+Optionally filter by material tag to get the bounding box for specific materials:
+
+```python
+import dagmc_h5m_file_inspector as di
+
+# Bounding box for a single material
+lower_left, upper_right = di.get_bounding_box_from_h5m("dagmc.h5m", materials="small_box")
+
+>>> lower_left
+array([-5., -5., -5.])
+
+>>> upper_right
+array([5., 5., 5.])
+
+# Bounding box for multiple materials (combined)
+lower_left, upper_right = di.get_bounding_box_from_h5m("dagmc.h5m", materials=["small_box", "big_box"])
+
+>>> lower_left
+array([-5., -10., -10.])
+
+>>> upper_right
+array([25., 10., 10.])
+```
+
 ## Getting geometric volume sizes by cell ID
 
 ```python
