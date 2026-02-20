@@ -19,6 +19,163 @@ class _SetInfo:
     parents: Sequence[int]
     flags: int
 
+# This is a reimplementation of the BoundingBox class is mainly API compatible with OpenMc
+# One difference is that this one does not make any use of Numpy
+# TODO if openmc becomes pip installable then we could make use of the openmc BoundingBox directly
+class BoundingBox:
+    """Axis-aligned bounding box.
+
+    Parameters
+    ----------
+    lower_left : iterable of float
+        Lower-left coordinates of the box (length 3).
+    upper_right : iterable of float
+        Upper-right coordinates of the box (length 3).
+    """
+
+    def __and__(self, other: "BoundingBox") -> "BoundingBox":
+        """Intersection of two bounding boxes."""
+        if not isinstance(other, BoundingBox):
+            return NotImplemented
+        new = BoundingBox(self._lower_left, self._upper_right)
+        new &= other
+        return new
+
+    def __contains__(self, other):
+        """Check if a point or BoundingBox is inside the bounding box."""
+        if isinstance(other, BoundingBox):
+            return all(
+                a <= p <= b
+                for p, a, b in zip(other._lower_left, self._lower_left, self._upper_right)
+            ) and all(
+                a <= p <= b
+                for p, a, b in zip(other._upper_right, self._lower_left, self._upper_right)
+            )
+        point = tuple(float(v) for v in other)
+        if len(point) != 3:
+            raise ValueError(f"point must have length 3, got {len(point)}")
+        return all(a <= p <= b for p, a, b in zip(point, self._lower_left, self._upper_right))
+
+    def __getitem__(self, key) -> Tuple[float, float, float]:
+        """Index into the bounding box (0=lower_left, 1=upper_right)."""
+        return (self._lower_left, self._upper_right)[key]
+
+    def __iand__(self, other: "BoundingBox") -> "BoundingBox":
+        """In-place intersection of two bounding boxes."""
+        if not isinstance(other, BoundingBox):
+            return NotImplemented
+        self._lower_left = tuple(max(a, b) for a, b in zip(self._lower_left, other._lower_left))
+        self._upper_right = tuple(min(a, b) for a, b in zip(self._upper_right, other._upper_right))
+        return self
+
+    def __init__(self, lower_left, upper_right):
+        self._lower_left = tuple(float(v) for v in lower_left)
+        self._upper_right = tuple(float(v) for v in upper_right)
+        if len(self._lower_left) != 3:
+            raise ValueError(f"lower_left must have length 3, got {len(self._lower_left)}")
+        if len(self._upper_right) != 3:
+            raise ValueError(f"upper_right must have length 3, got {len(self._upper_right)}")
+
+    def __ior__(self, other: "BoundingBox") -> "BoundingBox":
+        """In-place union of two bounding boxes."""
+        if not isinstance(other, BoundingBox):
+            return NotImplemented
+        self._lower_left = tuple(min(a, b) for a, b in zip(self._lower_left, other._lower_left))
+        self._upper_right = tuple(max(a, b) for a, b in zip(self._upper_right, other._upper_right))
+        return self
+
+    def __len__(self) -> int:
+        """Length of the bounding box (always 2: lower_left + upper_right)."""
+        return 2
+
+    def __or__(self, other: "BoundingBox") -> "BoundingBox":
+        """Union of two bounding boxes."""
+        if not isinstance(other, BoundingBox):
+            return NotImplemented
+        new = BoundingBox(self._lower_left, self._upper_right)
+        new |= other
+        return new
+
+    def __repr__(self) -> str:
+        return f"BoundingBox({self._lower_left}, {self._upper_right})"
+
+    def __setitem__(self, key, val):
+        """Set lower_left (0) or upper_right (1) by index."""
+        val = tuple(float(v) for v in val)
+        if key == 0:
+            self._lower_left = val
+        elif key == 1:
+            self._upper_right = val
+        else:
+            raise IndexError(f"index {key} out of range for BoundingBox")
+
+    @property
+    def center(self) -> Tuple[float, float, float]:
+        """Center point of the box."""
+        return tuple((a + b) / 2.0 for a, b in zip(self._lower_left, self._upper_right))
+
+    def expand(self, padding, inplace=False) -> "BoundingBox":
+        """Expand the box by *padding* in all directions.
+
+        Parameters
+        ----------
+        padding : float or iterable of float
+            Amount to expand by. Scalar applies to all axes.
+        inplace : bool
+            If True, modify this box. Otherwise return a new one.
+        """
+        try:
+            pad = tuple(float(v) for v in padding)
+        except TypeError:
+            pad = (float(padding),) * 3
+        if len(pad) != 3:
+            raise ValueError(f"padding must be scalar or length 3, got length {len(pad)}")
+        ll = tuple(a - p for a, p in zip(self._lower_left, pad))
+        ur = tuple(a + p for a, p in zip(self._upper_right, pad))
+        if inplace:
+            self._lower_left = ll
+            self._upper_right = ur
+            return self
+        return BoundingBox(ll, ur)
+
+    @property
+    def extent(self) -> Dict[str, Tuple[float, float, float, float]]:
+        """Extent of the box as (left, right, bottom, top) tuples keyed by
+        basis plane.  Intended for use with Matplotlib's ``imshow`` *extent*
+        parameter."""
+        ll, ur = self._lower_left, self._upper_right
+        return {
+            'xy': (ll[0], ur[0], ll[1], ur[1]),
+            'xz': (ll[0], ur[0], ll[2], ur[2]),
+            'yz': (ll[1], ur[1], ll[2], ur[2]),
+        }
+
+    @classmethod
+    def infinite(cls):
+        """Return an infinite bounding box."""
+        return cls((-float('inf'),) * 3, (float('inf'),) * 3)
+
+    @property
+    def lower_left(self) -> Tuple[float, float, float]:
+        """Lower-left coordinates of the box."""
+        return self._lower_left
+
+    @property
+    def upper_right(self) -> Tuple[float, float, float]:
+        """Upper-right coordinates of the box."""
+        return self._upper_right
+
+    @property
+    def volume(self) -> float:
+        """Volume of the box (product of widths)."""
+        w = self.width
+        return w[0] * w[1] * w[2]
+
+    @property
+    def width(self) -> Tuple[float, float, float]:
+        """Width along each axis (upper_right - lower_left)."""
+        return tuple(b - a for a, b in zip(self._lower_left, self._upper_right))
+
 
 # ============================================================================
 # h5py backend implementation
@@ -110,13 +267,13 @@ def _get_volumes_and_materials_h5py(filename: str, remove_prefix: bool) -> dict:
         return vol_mat
 
 
-def _get_bounding_box_h5py(filename: str) -> Tuple[np.ndarray, np.ndarray]:
+def _get_bounding_box_h5py(filename: str) -> BoundingBox:
     """Get bounding box using h5py backend."""
     with h5py.File(filename, "r") as f:
         coords = f["tstt/nodes/coordinates"][()]
         lower_left = coords.min(axis=0)
         upper_right = coords.max(axis=0)
-        return lower_left, upper_right
+        return BoundingBox(lower_left, upper_right)
 
 
 def _calculate_triangle_volumes(vertices: np.ndarray, triangles: np.ndarray) -> float:
@@ -594,7 +751,7 @@ def _get_volumes_and_materials_pymoab(filename: str, remove_prefix: bool) -> dic
     return vol_mat
 
 
-def _get_bounding_box_pymoab(filename: str) -> Tuple[np.ndarray, np.ndarray]:
+def _get_bounding_box_pymoab(filename: str) -> BoundingBox:
     """Get bounding box using pymoab backend."""
     import pymoab as mb
 
@@ -606,7 +763,7 @@ def _get_bounding_box_pymoab(filename: str) -> Tuple[np.ndarray, np.ndarray]:
 
     lower_left = coords.min(axis=0)
     upper_right = coords.max(axis=0)
-    return lower_left, upper_right
+    return BoundingBox(lower_left, upper_right)
 
 
 def _get_triangle_conn_and_coords_h5py(filename: str) -> Dict[int, Tuple[np.ndarray, np.ndarray]]:
@@ -956,7 +1113,7 @@ def get_bounding_box_from_h5m(
     filename: str,
     materials: Optional[Union[str, List[str]]] = None,
     backend: Literal["h5py", "pymoab"] = "h5py",
-) -> Tuple[np.ndarray, np.ndarray]:
+) -> "BoundingBox":
     """Reads in a DAGMC h5m file and returns the axis-aligned bounding box.
 
     Arguments:
@@ -969,8 +1126,7 @@ def get_bounding_box_from_h5m(
         backend: the backend to use for reading the file ("h5py" or "pymoab")
 
     Returns:
-        A tuple of (lower_left, upper_right) numpy arrays representing
-        the corners of the bounding box
+        A BoundingBox object representing the axis-aligned bounding box.
     """
     if not Path(filename).is_file():
         raise FileNotFoundError(f"filename provided ({filename}) does not exist")
@@ -1015,7 +1171,7 @@ def get_bounding_box_from_h5m(
 
     lower_left = all_coords.min(axis=0)
     upper_right = all_coords.max(axis=0)
-    return lower_left, upper_right
+    return BoundingBox(lower_left, upper_right)
 
 
 def get_volumes_from_h5m_by_cell_id(
