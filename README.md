@@ -58,16 +58,52 @@ di.get_volumes_and_materials_from_h5m("dagmc.h5m")
 
 ## Getting the bounding box
 
+Returns a `BoundingBox` object that is API compatible with OpenMC's `openmc.BoundingBox`.
+
 ```python
 import dagmc_h5m_file_inspector as di
 
-lower_left, upper_right = di.get_bounding_box_from_h5m("dagmc.h5m")
+bbox = di.get_bounding_box_from_h5m("dagmc.h5m")
 
->>> lower_left
-array([-5., -10., -10.])
+>>> bbox
+BoundingBox((-5.0, -10.0, -10.0), (25.0, 10.0, 10.0))
 
->>> upper_right
-array([25., 10., 10.])
+>>> bbox.lower_left
+(-5.0, -10.0, -10.0)
+
+>>> bbox.upper_right
+(25.0, 10.0, 10.0)
+
+>>> bbox.center
+(10.0, 0.0, 0.0)
+
+>>> bbox.volume
+18000.0
+
+>>> bbox.width
+(30.0, 20.0, 20.0)
+
+>>> bbox.extent
+{'xy': (-5.0, 25.0, -10.0, 10.0), 'xz': (-5.0, 25.0, -10.0, 10.0), 'yz': (-10.0, 10.0, -10.0, 10.0)}
+```
+
+The `BoundingBox` supports indexing, unpacking, containment checks, and set operations:
+
+```python
+# Unpacking
+lower_left, upper_right = bbox
+
+# Indexing
+>>> bbox[0]
+(-5.0, -10.0, -10.0)
+
+# Point containment
+>>> (0.0, 0.0, 0.0) in bbox
+True
+
+# Intersection and union of two bounding boxes
+bbox_intersection = bbox1 & bbox2
+bbox_union = bbox1 | bbox2
 ```
 
 Optionally filter by material tag to get the bounding box for specific materials:
@@ -76,22 +112,22 @@ Optionally filter by material tag to get the bounding box for specific materials
 import dagmc_h5m_file_inspector as di
 
 # Bounding box for a single material
-lower_left, upper_right = di.get_bounding_box_from_h5m("dagmc.h5m", materials="small_box")
+bbox = di.get_bounding_box_from_h5m("dagmc.h5m", materials="small_box")
 
->>> lower_left
-array([-5., -5., -5.])
+>>> bbox.lower_left
+(-5.0, -5.0, -5.0)
 
->>> upper_right
-array([5., 5., 5.])
+>>> bbox.upper_right
+(5.0, 5.0, 5.0)
 
 # Bounding box for multiple materials (combined)
-lower_left, upper_right = di.get_bounding_box_from_h5m("dagmc.h5m", materials=["small_box", "big_box"])
+bbox = di.get_bounding_box_from_h5m("dagmc.h5m", materials=["small_box", "big_box"])
 
->>> lower_left
-array([-5., -10., -10.])
+>>> bbox.lower_left
+(-5.0, -10.0, -10.0)
 
->>> upper_right
-array([25., 10., 10.])
+>>> bbox.upper_right
+(25.0, 10.0, 10.0)
 ```
 
 ## Getting geometric volume sizes by cell ID

@@ -104,13 +104,13 @@ def test_bounding_box(touching_boxes, backend):
     """Extracts the bounding box from a dagmc file and checks it matches
     the expected geometry bounds"""
 
-    lower_left, upper_right = di.get_bounding_box_from_h5m(
+    bb = di.get_bounding_box_from_h5m(
         filename=touching_boxes['filename'],
         backend=backend,
     )
 
-    np.testing.assert_allclose(lower_left, touching_boxes['lower_left'], rtol=1e-5)
-    np.testing.assert_allclose(upper_right, touching_boxes['upper_right'], rtol=1e-5)
+    np.testing.assert_allclose(bb.lower_left, touching_boxes['lower_left'], rtol=1e-5)
+    np.testing.assert_allclose(bb.upper_right, touching_boxes['upper_right'], rtol=1e-5)
 
 
 @pytest.mark.parametrize("backend", ["h5py", "pymoab"])
@@ -118,14 +118,14 @@ def test_bounding_box_single_material(touching_boxes, backend):
     """Bounding box for a single material (small_box) should match that
     volume's geometry only"""
 
-    lower_left, upper_right = di.get_bounding_box_from_h5m(
+    bb = di.get_bounding_box_from_h5m(
         filename=touching_boxes['filename'],
         materials="small_box",
         backend=backend,
     )
 
-    np.testing.assert_allclose(lower_left, touching_boxes['small_box_lower_left'], rtol=1e-5)
-    np.testing.assert_allclose(upper_right, touching_boxes['small_box_upper_right'], rtol=1e-5)
+    np.testing.assert_allclose(bb.lower_left, touching_boxes['small_box_lower_left'], rtol=1e-5)
+    np.testing.assert_allclose(bb.upper_right, touching_boxes['small_box_upper_right'], rtol=1e-5)
 
 
 @pytest.mark.parametrize("backend", ["h5py", "pymoab"])
@@ -133,14 +133,14 @@ def test_bounding_box_single_material_big(touching_boxes, backend):
     """Bounding box for a single material (big_box) should match that
     volume's geometry only"""
 
-    lower_left, upper_right = di.get_bounding_box_from_h5m(
+    bb = di.get_bounding_box_from_h5m(
         filename=touching_boxes['filename'],
         materials="big_box",
         backend=backend,
     )
 
-    np.testing.assert_allclose(lower_left, touching_boxes['big_box_lower_left'], rtol=1e-5)
-    np.testing.assert_allclose(upper_right, touching_boxes['big_box_upper_right'], rtol=1e-5)
+    np.testing.assert_allclose(bb.lower_left, touching_boxes['big_box_lower_left'], rtol=1e-5)
+    np.testing.assert_allclose(bb.upper_right, touching_boxes['big_box_upper_right'], rtol=1e-5)
 
 
 @pytest.mark.parametrize("backend", ["h5py", "pymoab"])
@@ -148,34 +148,34 @@ def test_bounding_box_material_list(touching_boxes, backend):
     """Bounding box for all materials as a list should match the global
     bounding box"""
 
-    lower_left, upper_right = di.get_bounding_box_from_h5m(
+    bb = di.get_bounding_box_from_h5m(
         filename=touching_boxes['filename'],
         materials=["small_box", "big_box"],
         backend=backend,
     )
 
-    np.testing.assert_allclose(lower_left, touching_boxes['lower_left'], rtol=1e-5)
-    np.testing.assert_allclose(upper_right, touching_boxes['upper_right'], rtol=1e-5)
+    np.testing.assert_allclose(bb.lower_left, touching_boxes['lower_left'], rtol=1e-5)
+    np.testing.assert_allclose(bb.upper_right, touching_boxes['upper_right'], rtol=1e-5)
 
 
 @pytest.mark.parametrize("backend", ["h5py", "pymoab"])
 def test_bounding_box_single_material_string(touching_boxes, backend):
     """Passing a single string should give the same result as a single-element list"""
 
-    ll_str, ur_str = di.get_bounding_box_from_h5m(
+    bb_str = di.get_bounding_box_from_h5m(
         filename=touching_boxes['filename'],
         materials="small_box",
         backend=backend,
     )
 
-    ll_list, ur_list = di.get_bounding_box_from_h5m(
+    bb_list = di.get_bounding_box_from_h5m(
         filename=touching_boxes['filename'],
         materials=["small_box"],
         backend=backend,
     )
 
-    np.testing.assert_allclose(ll_str, ll_list)
-    np.testing.assert_allclose(ur_str, ur_list)
+    np.testing.assert_allclose(bb_str.lower_left, bb_list.lower_left)
+    np.testing.assert_allclose(bb_str.upper_right, bb_list.upper_right)
 
 
 @pytest.mark.parametrize("backend", ["h5py", "pymoab"])
@@ -188,6 +188,40 @@ def test_bounding_box_invalid_material(touching_boxes, backend):
             materials="nonexistent",
             backend=backend,
         )
+
+
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+def test_bounding_box_returns_bounding_box_type(touching_boxes, backend):
+    """The return type should be BoundingBox"""
+
+    bb = di.get_bounding_box_from_h5m(
+        filename=touching_boxes['filename'],
+        backend=backend,
+    )
+
+    assert isinstance(bb, di.BoundingBox)
+
+
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+def test_bounding_box_properties(touching_boxes, backend):
+    """BoundingBox properties should return correct values"""
+
+    bb = di.get_bounding_box_from_h5m(
+        filename=touching_boxes['filename'],
+        backend=backend,
+    )
+
+    np.testing.assert_allclose(bb.lower_left, touching_boxes['lower_left'], rtol=1e-5)
+    np.testing.assert_allclose(bb.upper_right, touching_boxes['upper_right'], rtol=1e-5)
+
+    expected_center = (touching_boxes['lower_left'] + touching_boxes['upper_right']) / 2.0
+    np.testing.assert_allclose(bb.center, expected_center, rtol=1e-5)
+
+    expected_width = touching_boxes['upper_right'] - touching_boxes['lower_left']
+    np.testing.assert_allclose(bb.width, expected_width, rtol=1e-5)
+
+    expected_volume = float(np.prod(expected_width))
+    assert abs(bb.volume - expected_volume) / expected_volume < 1e-5
 
 
 @pytest.mark.parametrize("backend", ["h5py", "pymoab"])
@@ -295,27 +329,27 @@ def test_separated_material_extraction(separated_boxes, backend):
 def test_separated_bounding_box(separated_boxes, backend):
     """Extracts the bounding box from separated boxes"""
 
-    lower_left, upper_right = di.get_bounding_box_from_h5m(
+    bb = di.get_bounding_box_from_h5m(
         filename=separated_boxes['filename'],
         backend=backend,
     )
 
-    np.testing.assert_allclose(lower_left, separated_boxes['lower_left'], rtol=1e-5)
-    np.testing.assert_allclose(upper_right, separated_boxes['upper_right'], rtol=1e-5)
+    np.testing.assert_allclose(bb.lower_left, separated_boxes['lower_left'], rtol=1e-5)
+    np.testing.assert_allclose(bb.upper_right, separated_boxes['upper_right'], rtol=1e-5)
 
 
 @pytest.mark.parametrize("backend", ["h5py", "pymoab"])
 def test_separated_bounding_box_single_material(separated_boxes, backend):
     """Bounding box for a single material (box_a) in separated geometry"""
 
-    lower_left, upper_right = di.get_bounding_box_from_h5m(
+    bb = di.get_bounding_box_from_h5m(
         filename=separated_boxes['filename'],
         materials="box_a",
         backend=backend,
     )
 
-    np.testing.assert_allclose(lower_left, separated_boxes['box_a_lower_left'], rtol=1e-5)
-    np.testing.assert_allclose(upper_right, separated_boxes['box_a_upper_right'], rtol=1e-5)
+    np.testing.assert_allclose(bb.lower_left, separated_boxes['box_a_lower_left'], rtol=1e-5)
+    np.testing.assert_allclose(bb.upper_right, separated_boxes['box_a_upper_right'], rtol=1e-5)
 
 
 @pytest.mark.parametrize("backend", ["h5py", "pymoab"])
@@ -323,14 +357,14 @@ def test_separated_bounding_box_material_list(separated_boxes, backend):
     """Bounding box for all materials as a list should match the global
     bounding box for separated geometry"""
 
-    lower_left, upper_right = di.get_bounding_box_from_h5m(
+    bb = di.get_bounding_box_from_h5m(
         filename=separated_boxes['filename'],
         materials=["box_a", "box_b"],
         backend=backend,
     )
 
-    np.testing.assert_allclose(lower_left, separated_boxes['lower_left'], rtol=1e-5)
-    np.testing.assert_allclose(upper_right, separated_boxes['upper_right'], rtol=1e-5)
+    np.testing.assert_allclose(bb.lower_left, separated_boxes['lower_left'], rtol=1e-5)
+    np.testing.assert_allclose(bb.upper_right, separated_boxes['upper_right'], rtol=1e-5)
 
 
 @pytest.mark.parametrize("backend", ["h5py", "pymoab"])
@@ -725,7 +759,7 @@ def test_volume_sizes_openmc_stochastic_consistency(filename, tmp_path):
 
     # Get volumes and materials from our implementation
     h5py_volumes = di.get_volumes_from_h5m_by_cell_id(abs_filename, backend="h5py")
-    lower, upper = di.get_bounding_box_from_h5m(abs_filename)
+    bb = di.get_bounding_box_from_h5m(abs_filename)
     materials_list = di.get_materials_from_h5m(abs_filename, remove_prefix=True)
 
     # Create OpenMC materials matching the DAGMC file
@@ -750,8 +784,8 @@ def test_volume_sizes_openmc_stochastic_consistency(filename, tmp_path):
     vol_calc = openmc.VolumeCalculation(
         domains=openmc_mats,
         samples=50000,
-        lower_left=lower.tolist(),
-        upper_right=upper.tolist()
+        lower_left=bb.lower_left.tolist(),
+        upper_right=bb.upper_right.tolist()
     )
     settings.volume_calculations = [vol_calc]
 
