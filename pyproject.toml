@@ -35,7 +35,6 @@ pymoab = [
 ]
 tests = [
     "pytest >= 5.4.3",
-    "requests",
     "pytest-cov",
     "cad-to-dagmc",
     "cadquery",
