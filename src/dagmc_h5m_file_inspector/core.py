@@ -963,8 +963,16 @@ def _write_h5m(
         # === ELEMENTS ===
         elements = tstt.create_group("elements")
         elems = {
-            "Edge": 1, "Tri": 2, "Quad": 3, "Polygon": 4, "Tet": 5,
-            "Pyramid": 6, "Prism": 7, "Knife": 8, "Hex": 9, "Polyhedron": 10,
+            "Edge": 1,
+            "Tri": 2,
+            "Quad": 3,
+            "Polygon": 4,
+            "Tet": 5,
+            "Pyramid": 6,
+            "Prism": 7,
+            "Knife": 8,
+            "Hex": 9,
+            "Polyhedron": 10,
         }
         tstt["elemtypes"] = h5py.enum_dtype(elems)
 
@@ -1094,18 +1102,12 @@ def _write_h5m(
             sense_values.append([vol, 0])
 
         if sense_values:
-            gs2_values = np.zeros(
-                (len(sense_values),), dtype=[("f0", "<u8", (2,))]
-            )
+            gs2_values = np.zeros((len(sense_values),), dtype=[("f0", "<u8", (2,))])
             gs2_values["f0"] = np.array(sense_values, dtype=np.uint64)
             gs2_space = h5py.h5s.create_simple((len(sense_values),))
             gs2_arr_type = h5py.h5t.array_create(h5py.h5t.NATIVE_UINT64, (2,))
-            gs2_dset = h5py.h5d.create(
-                gs2_group.id, b"values", gs2_arr_type, gs2_space
-            )
-            gs2_dset.write(
-                h5py.h5s.ALL, h5py.h5s.ALL, gs2_values, mtype=gs2_arr_type
-            )
+            gs2_dset = h5py.h5d.create(gs2_group.id, b"values", gs2_arr_type, gs2_space)
+            gs2_dset.write(h5py.h5s.ALL, h5py.h5s.ALL, gs2_values, mtype=gs2_arr_type)
             gs2_dset.close()
 
         # GLOBAL_ID (sparse tag)
@@ -1126,12 +1128,8 @@ def _write_h5m(
         gid_group.attrs.create("class", 2, dtype=np.int32)
         gid_group.attrs.create("default", -1, dtype=gid_group["type"])
         gid_group.attrs.create("global", -1, dtype=gid_group["type"])
-        gid_group.create_dataset(
-            "id_list", data=np.array(gid_ids, dtype=np.uint64)
-        )
-        gid_group.create_dataset(
-            "values", data=np.array(gid_values, dtype=np.int32)
-        )
+        gid_group.create_dataset("id_list", data=np.array(gid_ids, dtype=np.uint64))
+        gid_group.create_dataset("values", data=np.array(gid_values, dtype=np.int32))
 
         # NAME tag (for groups)
         name_ids: List[int] = []
@@ -1142,13 +1140,9 @@ def _write_h5m(
 
         name_group = tstt_tags.create_group("NAME")
         name_group.attrs.create("class", 1, dtype=np.int32)
-        name_group.create_dataset(
-            "id_list", data=np.array(name_ids, dtype=np.uint64)
-        )
+        name_group.create_dataset("id_list", data=np.array(name_ids, dtype=np.uint64))
         name_group["type"] = h5py.opaque_dtype(np.dtype("S32"))
-        name_group.create_dataset(
-            "values", data=name_values, dtype=name_group["type"]
-        )
+        name_group.create_dataset("values", data=name_values, dtype=name_group["type"])
 
         for tag_name in ["DIRICHLET_SET", "MATERIAL_SET", "NEUMANN_SET"]:
             tag_grp = tstt_tags.create_group(tag_name)
@@ -2000,9 +1994,7 @@ def remove_materials_from_h5m(
     """
     _validate_backend(backend)
     if not Path(input_filename).is_file():
-        raise FileNotFoundError(
-            f"filename provided ({input_filename}) does not exist"
-        )
+        raise FileNotFoundError(f"filename provided ({input_filename}) does not exist")
 
     if isinstance(materials_to_remove, str):
         materials_to_remove = [materials_to_remove]
@@ -2012,6 +2004,4 @@ def remove_materials_from_h5m(
         return _remove_materials_pymoab(
             input_filename, output_filename, materials_to_remove
         )
-    return _remove_materials_h5py(
-        input_filename, output_filename, materials_to_remove
-    )
+    return _remove_materials_h5py(input_filename, output_filename, materials_to_remove)
