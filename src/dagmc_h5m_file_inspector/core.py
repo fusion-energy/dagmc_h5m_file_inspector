@@ -888,6 +888,450 @@ def _get_triangle_conn_and_coords_h5py(
         return result
 
 
+def _write_h5m(
+    filename: str,
+    volumes_data: Dict[int, Tuple[np.ndarray, np.ndarray]],
+    vol_mat_mapping: Dict[int, str],
+) -> None:
+    """Write a DAGMC h5m file from per-volume triangle data using h5py.
+
+    Arguments:
+        filename: output file path
+        volumes_data: dict mapping volume_id -> (connectivity, coordinates)
+            where connectivity is Mx3 (0-based into coordinates) and
+            coordinates is Nx3 float64
+        vol_mat_mapping: dict mapping volume_id -> material_name (without
+            ``mat:`` prefix)
+    """
+    from datetime import datetime
+
+    # Sort volume IDs for deterministic output
+    vol_ids = sorted(volumes_data.keys())
+
+    # Merge per-volume coordinates into a global vertex array and
+    # adjust connectivity to global indices.
+    all_coords: List[np.ndarray] = []
+    all_triangles: List[np.ndarray] = []
+    # Track per-volume triangle ranges (start_idx, count) in global array
+    vol_tri_ranges: Dict[int, Tuple[int, int]] = {}
+    # Track per-volume vertex ranges (start_idx, count) in global array
+    vol_vert_ranges: Dict[int, Tuple[int, int]] = {}
+    vert_offset = 0
+    tri_offset = 0
+    for vid in vol_ids:
+        conn, coords = volumes_data[vid]
+        n_verts = len(coords)
+        n_tris = len(conn)
+        if n_tris == 0:
+            vol_tri_ranges[vid] = (tri_offset, 0)
+            vol_vert_ranges[vid] = (vert_offset, 0)
+            continue
+        all_coords.append(coords)
+        all_triangles.append(conn + vert_offset)
+        vol_vert_ranges[vid] = (vert_offset, n_verts)
+        vol_tri_ranges[vid] = (tri_offset, n_tris)
+        vert_offset += n_verts
+        tri_offset += n_tris
+
+    if not all_coords:
+        vertices_arr = np.empty((0, 3), dtype=np.float64)
+        triangles_arr = np.empty((0, 3), dtype=np.int64)
+    else:
+        vertices_arr = np.concatenate(all_coords, axis=0)
+        triangles_arr = np.concatenate(all_triangles, axis=0)
+
+    num_vertices = len(vertices_arr)
+    num_triangles = len(triangles_arr)
+
+    Path(filename).parent.mkdir(parents=True, exist_ok=True)
+
+    with h5py.File(filename, "w") as f:
+        tstt = f.create_group("tstt")
+        global_id = 1
+
+        # === NODES ===
+        nodes_group = tstt.create_group("nodes")
+        coords_ds = nodes_group.create_dataset("coordinates", data=vertices_arr)
+        coords_ds.attrs.create("start_id", global_id)
+        global_id += num_vertices
+
+        node_tags = nodes_group.create_group("tags")
+        node_tags.create_dataset(
+            "GLOBAL_ID", data=np.full(num_vertices, -1, dtype=np.int32)
+        )
+
+        # === ELEMENTS ===
+        elements = tstt.create_group("elements")
+        elems = {
+            "Edge": 1, "Tri": 2, "Quad": 3, "Polygon": 4, "Tet": 5,
+            "Pyramid": 6, "Prism": 7, "Knife": 8, "Hex": 9, "Polyhedron": 10,
+        }
+        tstt["elemtypes"] = h5py.enum_dtype(elems)
+
+        now = datetime.now()
+        tstt.create_dataset(
+            "history",
+            data=[
+                "dagmc_h5m_file_inspector".encode("ascii"),
+                now.strftime("%m/%d/%y").encode("ascii"),
+                now.strftime("%H:%M:%S").encode("ascii"),
+            ],
+        )
+
+        tri3_group = elements.create_group("Tri3")
+        tri3_group.attrs.create("element_type", elems["Tri"], dtype=tstt["elemtypes"])
+        connectivity_ds = tri3_group.create_dataset(
+            "connectivity",
+            data=triangles_arr + 1,  # 1-based vertex IDs in h5m
+            dtype=np.uint64,
+        )
+        triangle_start_id = global_id
+        connectivity_ds.attrs.create("start_id", triangle_start_id)
+        global_id += num_triangles
+
+        tags_tri3 = tri3_group.create_group("tags")
+        tags_tri3.create_dataset(
+            "GLOBAL_ID", data=np.full(num_triangles, -1, dtype=np.int32)
+        )
+
+        # === SETS layout ===
+        # File set first (position 0) to absorb the off-by-one in the
+        # h5py reader's entity-handle mapping, then surfaces, volumes,
+        # groups — matching cad_to_dagmc's structure.
+        sets_start_id = global_id
+
+        surface_set_ids: Dict[int, int] = {}
+        volume_set_ids: Dict[int, int] = {}
+        current_set_id = sets_start_id
+
+        # File set (position 0 — NOT tagged with CATEGORY)
+        file_set_id = current_set_id
+        current_set_id += 1
+
+        # Surface sets (one per volume)
+        for vid in vol_ids:
+            surface_set_ids[vid] = current_set_id
+            current_set_id += 1
+
+        # Volume sets
+        for vid in vol_ids:
+            volume_set_ids[vid] = current_set_id
+            current_set_id += 1
+
+        # Group sets (one per unique material)
+        unique_materials = sorted(set(vol_mat_mapping[v] for v in vol_ids))
+        mat_to_group_set_id: Dict[str, int] = {}
+        for mat_name in unique_materials:
+            mat_to_group_set_id[mat_name] = current_set_id
+            current_set_id += 1
+
+        global_id = current_set_id
+
+        # === TAGS ===
+        tstt_tags = tstt.create_group("tags")
+
+        # CATEGORY
+        category_set_ids_list: List[int] = []
+        categories: List[str] = []
+        geom_dim_set_ids_list: List[int] = []
+        geom_dimensions: List[int] = []
+
+        for vid in vol_ids:
+            category_set_ids_list.append(volume_set_ids[vid])
+            categories.append("Volume")
+            geom_dim_set_ids_list.append(volume_set_ids[vid])
+            geom_dimensions.append(3)
+
+        for mat_name in unique_materials:
+            category_set_ids_list.append(mat_to_group_set_id[mat_name])
+            categories.append("Group")
+
+        for vid in vol_ids:
+            category_set_ids_list.append(surface_set_ids[vid])
+            categories.append("Surface")
+            geom_dim_set_ids_list.append(surface_set_ids[vid])
+            geom_dimensions.append(2)
+
+        cat_group = tstt_tags.create_group("CATEGORY")
+        cat_group.attrs.create("class", 1, dtype=np.int32)
+        cat_group.create_dataset(
+            "id_list", data=np.array(category_set_ids_list, dtype=np.uint64)
+        )
+        opaque_dt = h5py.opaque_dtype(np.dtype("V32"))
+        cat_group["type"] = opaque_dt
+        cat_values = np.array(
+            [s.encode("ascii").ljust(32, b"\x00") for s in categories], dtype="V32"
+        )
+        cat_group.create_dataset("values", data=cat_values)
+
+        # GEOM_DIMENSION
+        geom_group = tstt_tags.create_group("GEOM_DIMENSION")
+        geom_group["type"] = np.dtype("i4")
+        geom_group.attrs.create("class", 1, dtype=np.int32)
+        geom_group.attrs.create("default", -1, dtype=geom_group["type"])
+        geom_group.attrs.create("global", -1, dtype=geom_group["type"])
+        geom_group.create_dataset(
+            "id_list", data=np.array(geom_dim_set_ids_list, dtype=np.uint64)
+        )
+        geom_group.create_dataset(
+            "values", data=np.array(geom_dimensions, dtype=np.int32)
+        )
+
+        # GEOM_SENSE_2
+        surface_ids_for_sense = [surface_set_ids[vid] for vid in vol_ids]
+        gs2_group = tstt_tags.create_group("GEOM_SENSE_2")
+        gs2_dtype = np.dtype("(2,)u8")
+        gs2_group["type"] = gs2_dtype
+        gs2_group.attrs.create("class", 1, dtype=np.int32)
+        gs2_group.attrs.create("is_handle", 1, dtype=np.int32)
+        gs2_group.create_dataset(
+            "id_list", data=np.array(surface_ids_for_sense, dtype=np.uint64)
+        )
+
+        sense_values = []
+        for vid in vol_ids:
+            vol = volume_set_ids[vid]
+            sense_values.append([vol, 0])
+
+        if sense_values:
+            gs2_values = np.zeros(
+                (len(sense_values),), dtype=[("f0", "<u8", (2,))]
+            )
+            gs2_values["f0"] = np.array(sense_values, dtype=np.uint64)
+            gs2_space = h5py.h5s.create_simple((len(sense_values),))
+            gs2_arr_type = h5py.h5t.array_create(h5py.h5t.NATIVE_UINT64, (2,))
+            gs2_dset = h5py.h5d.create(
+                gs2_group.id, b"values", gs2_arr_type, gs2_space
+            )
+            gs2_dset.write(
+                h5py.h5s.ALL, h5py.h5s.ALL, gs2_values, mtype=gs2_arr_type
+            )
+            gs2_dset.close()
+
+        # GLOBAL_ID (sparse tag)
+        gid_ids: List[int] = []
+        gid_values: List[int] = []
+        for vid in vol_ids:
+            gid_ids.append(surface_set_ids[vid])
+            gid_values.append(vid)
+        for vid in vol_ids:
+            gid_ids.append(volume_set_ids[vid])
+            gid_values.append(vid)
+        for mat_name in unique_materials:
+            gid_ids.append(mat_to_group_set_id[mat_name])
+            gid_values.append(-1)
+
+        gid_group = tstt_tags.create_group("GLOBAL_ID")
+        gid_group["type"] = np.dtype("i4")
+        gid_group.attrs.create("class", 2, dtype=np.int32)
+        gid_group.attrs.create("default", -1, dtype=gid_group["type"])
+        gid_group.attrs.create("global", -1, dtype=gid_group["type"])
+        gid_group.create_dataset(
+            "id_list", data=np.array(gid_ids, dtype=np.uint64)
+        )
+        gid_group.create_dataset(
+            "values", data=np.array(gid_values, dtype=np.int32)
+        )
+
+        # NAME tag (for groups)
+        name_ids: List[int] = []
+        name_values: List[str] = []
+        for mat_name in unique_materials:
+            name_ids.append(mat_to_group_set_id[mat_name])
+            name_values.append(f"mat:{mat_name}")
+
+        name_group = tstt_tags.create_group("NAME")
+        name_group.attrs.create("class", 1, dtype=np.int32)
+        name_group.create_dataset(
+            "id_list", data=np.array(name_ids, dtype=np.uint64)
+        )
+        name_group["type"] = h5py.opaque_dtype(np.dtype("S32"))
+        name_group.create_dataset(
+            "values", data=name_values, dtype=name_group["type"]
+        )
+
+        for tag_name in ["DIRICHLET_SET", "MATERIAL_SET", "NEUMANN_SET"]:
+            tag_grp = tstt_tags.create_group(tag_name)
+            tag_grp["type"] = np.dtype("i4")
+            tag_grp.attrs.create("class", 1, dtype=np.int32)
+            tag_grp.attrs.create("default", -1, dtype=tag_grp["type"])
+            tag_grp.attrs.create("global", -1, dtype=tag_grp["type"])
+
+        # === SETS structure ===
+        sets_group = tstt.create_group("sets")
+
+        contents_arr: List[int] = []
+        list_rows: List[List[int]] = []
+        parents_list: List[int] = []
+        children_list: List[int] = []
+
+        contents_end = -1
+        children_end = -1
+        parents_end = -1
+
+        # File set first (position 0) — contains everything
+        last_handle = max(
+            [file_set_id]
+            + list(surface_set_ids.values())
+            + list(volume_set_ids.values())
+            + list(mat_to_group_set_id.values())
+        )
+        if num_vertices > 0 or num_triangles > 0:
+            contents_arr.extend([1, last_handle])
+            contents_end = len(contents_arr) - 1
+        list_rows.append([contents_end, children_end, parents_end, 10])
+
+        # Surface sets — each contains the vertices + triangles for one volume
+        for vid in vol_ids:
+            tri_start_idx, tri_count = vol_tri_ranges[vid]
+            vert_start_idx, vert_count = vol_vert_ranges[vid]
+
+            # Vertex handles (1-based)
+            for i in range(vert_count):
+                contents_arr.append(vert_start_idx + i + 1)
+
+            # Triangle handles
+            for i in range(tri_count):
+                contents_arr.append(triangle_start_id + tri_start_idx + i)
+
+            contents_end = len(contents_arr) - 1
+
+            # Parent = the volume set
+            parents_list.append(volume_set_ids[vid])
+            parents_end = len(parents_list) - 1
+
+            # flags: 2 = MESHSET_SET
+            list_rows.append([contents_end, children_end, parents_end, 2])
+
+        # Volume sets — have surface as child, no direct content
+        for vid in vol_ids:
+            children_list.append(surface_set_ids[vid])
+            children_end = len(children_list) - 1
+            list_rows.append([contents_end, children_end, parents_end, 2])
+
+        # Group sets — contain volume handles
+        for mat_name in unique_materials:
+            vols_in_mat = [vid for vid in vol_ids if vol_mat_mapping[vid] == mat_name]
+            for vid in vols_in_mat:
+                contents_arr.append(volume_set_ids[vid])
+            contents_end = len(contents_arr) - 1
+            list_rows.append([contents_end, children_end, parents_end, 2])
+
+        sets_group.create_dataset(
+            "contents", data=np.array(contents_arr, dtype=np.uint64)
+        )
+        sets_group.create_dataset(
+            "children",
+            data=np.array(children_list, dtype=np.uint64)
+            if children_list
+            else np.array([], dtype=np.uint64),
+        )
+        sets_group.create_dataset(
+            "parents",
+            data=np.array(parents_list, dtype=np.uint64)
+            if parents_list
+            else np.array([], dtype=np.uint64),
+        )
+
+        lst = sets_group.create_dataset(
+            "list", data=np.array(list_rows, dtype=np.int64)
+        )
+        lst.attrs.create("start_id", sets_start_id)
+
+        # Dense GLOBAL_ID for sets (matches set list order: file, surfaces,
+        # volumes, groups)
+        set_global_ids: List[int] = []
+        set_global_ids.append(-1)  # file set (position 0)
+        for vid in vol_ids:
+            set_global_ids.append(vid)  # surface
+        for vid in vol_ids:
+            set_global_ids.append(vid)  # volume
+        for _mat_name in unique_materials:
+            set_global_ids.append(-1)  # group
+
+        sets_tags = sets_group.create_group("tags")
+        sets_tags.create_dataset(
+            "GLOBAL_ID", data=np.array(set_global_ids, dtype=np.int32)
+        )
+
+        tstt.attrs.create("max_id", np.uint64(global_id - 1))
+
+
+def _remove_materials_h5py(
+    input_filename: str,
+    output_filename: str,
+    materials_to_remove: List[str],
+) -> List[str]:
+    """Remove materials using h5py backend (read-filter-write approach)."""
+    vol_mat = get_volumes_and_materials_from_h5m(
+        filename=input_filename, remove_prefix=True, backend="h5py"
+    )
+    all_materials = sorted(set(vol_mat.values()))
+    matched = sorted(set(materials_to_remove) & set(all_materials))
+    if not matched:
+        raise ValueError(
+            f"None of the specified materials {materials_to_remove} found in "
+            f"{input_filename}. Available materials: {all_materials}"
+        )
+
+    vol_data = get_triangle_conn_and_coords_by_volume(
+        filename=input_filename, backend="h5py"
+    )
+
+    keep_vols = {
+        vid: mat for vid, mat in vol_mat.items() if mat not in materials_to_remove
+    }
+
+    if not keep_vols:
+        # All volumes removed — write an empty-ish file
+        _write_h5m(output_filename, {}, {})
+    else:
+        keep_data = {vid: vol_data[vid] for vid in keep_vols}
+        _write_h5m(output_filename, keep_data, keep_vols)
+
+    return matched
+
+
+def _remove_materials_pymoab(
+    input_filename: str,
+    output_filename: str,
+    materials_to_remove: List[str],
+) -> List[str]:
+    """Remove materials using pymoab backend.
+
+    Uses the same read-filter-write approach as the h5py backend: reads the
+    data, filters out unwanted volumes, and writes a fresh file using
+    ``_write_h5m``.  This avoids issues with pymoab's ``write_file`` when
+    all groups are removed.
+    """
+    vol_mat = get_volumes_and_materials_from_h5m(
+        filename=input_filename, remove_prefix=True, backend="pymoab"
+    )
+    all_materials = sorted(set(vol_mat.values()))
+    matched = sorted(set(materials_to_remove) & set(all_materials))
+    if not matched:
+        raise ValueError(
+            f"None of the specified materials {materials_to_remove} found in "
+            f"{input_filename}. Available materials: {all_materials}"
+        )
+
+    vol_data = get_triangle_conn_and_coords_by_volume(
+        filename=input_filename, backend="pymoab"
+    )
+
+    keep_vols = {
+        vid: mat for vid, mat in vol_mat.items() if mat not in materials_to_remove
+    }
+
+    if not keep_vols:
+        _write_h5m(output_filename, {}, {})
+    else:
+        keep_data = {vid: vol_data[vid] for vid in keep_vols}
+        _write_h5m(output_filename, keep_data, keep_vols)
+
+    return matched
+
+
 def _get_triangle_conn_and_coords_pymoab(
     filename: str,
 ) -> Dict[int, Tuple[np.ndarray, np.ndarray]]:
@@ -1527,3 +1971,47 @@ def get_triangle_conn_and_coords_by_volume(
         _check_pymoab_available()
         return _get_triangle_conn_and_coords_pymoab(filename)
     return _get_triangle_conn_and_coords_h5py(filename)
+
+
+def remove_materials_from_h5m(
+    input_filename: str,
+    output_filename: str,
+    materials_to_remove: Union[str, List[str]],
+    backend: Literal["h5py", "pymoab"] = "h5py",
+) -> List[str]:
+    """Remove materials from a DAGMC h5m file and write a new file without them.
+
+    Volumes belonging to the removed materials are excluded from the output.
+
+    Arguments:
+        input_filename: path to the input DAGMC h5m file
+        output_filename: path for the output h5m file
+        materials_to_remove: material name or list of material names to remove
+            (without the ``mat:`` prefix, matching the convention of
+            ``get_materials_from_h5m(remove_prefix=True)``)
+        backend: the backend to use ("h5py" or "pymoab")
+
+    Returns:
+        A sorted list of material names that were actually removed.
+
+    Raises:
+        FileNotFoundError: If *input_filename* does not exist.
+        ValueError: If none of the specified materials are found in the file.
+    """
+    _validate_backend(backend)
+    if not Path(input_filename).is_file():
+        raise FileNotFoundError(
+            f"filename provided ({input_filename}) does not exist"
+        )
+
+    if isinstance(materials_to_remove, str):
+        materials_to_remove = [materials_to_remove]
+
+    if backend == "pymoab":
+        _check_pymoab_available()
+        return _remove_materials_pymoab(
+            input_filename, output_filename, materials_to_remove
+        )
+    return _remove_materials_h5py(
+        input_filename, output_filename, materials_to_remove
+    )
