@@ -737,18 +737,11 @@ H5M_TEST_FILES_OPENMC_STOCHASTIC = [
 
 @requires_openmc
 @pytest.mark.parametrize("filename", H5M_TEST_FILES_OPENMC_STOCHASTIC)
-@pytest.mark.skipif(
-    os.environ.get("CI") == "true" or os.environ.get("GITHUB_ACTIONS") == "true",
-    reason="OpenMC stochastic volume tests skipped in CI",
-)
 def test_volume_sizes_openmc_stochastic_consistency(filename, tmp_path):
     """Verify our volume calculations match OpenMC stochastic results.
 
     OpenMC uses Monte Carlo sampling to estimate volumes, so we allow
     a larger tolerance (5%) to account for statistical noise.
-
-    This test is skipped in CI environments as it requires OpenMC cross
-    sections data to be installed.
     """
     from pathlib import Path
 
@@ -756,6 +749,18 @@ def test_volume_sizes_openmc_stochastic_consistency(filename, tmp_path):
 
     # Convert to absolute path before changing directories
     abs_filename = str(Path(filename).resolve())
+
+    # Set up cross sections (H1 only)
+    xs_path = os.path.join(os.path.dirname(__file__), "ENDFB-7.1-NNDC_H1.h5")
+    xs_xml = str(tmp_path / "cross_sections.xml")
+    with open(xs_xml, "w") as fh:
+        fh.write(
+            '<?xml version="1.0" encoding="UTF-8"?>\n'
+            "<cross_sections>\n"
+            f'  <library materials="H1" path="{xs_path}" type="neutron"/>\n'
+            "</cross_sections>\n"
+        )
+    openmc.config["cross_sections"] = xs_xml
 
     # Get volumes and materials from our implementation
     bb = di.get_bounding_box_from_h5m(abs_filename)
@@ -783,8 +788,8 @@ def test_volume_sizes_openmc_stochastic_consistency(filename, tmp_path):
     vol_calc = openmc.VolumeCalculation(
         domains=openmc_mats,
         samples=50000,
-        lower_left=bb.lower_left.tolist(),
-        upper_right=bb.upper_right.tolist(),
+        lower_left=list(bb.lower_left),
+        upper_right=list(bb.upper_right),
     )
     settings.volume_calculations = [vol_calc]
 
@@ -1154,6 +1159,257 @@ def test_convert_h5m_to_vtkhdf_file_not_found():
 
     with pytest.raises(FileNotFoundError):
         di.convert_h5m_to_vtkhdf(h5m_filename="nonexistent.h5m")
+
+
+# ============================================================================
+# Tests for remove_materials_from_h5m
+# ============================================================================
+
+
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+def test_remove_single_material(touching_boxes, backend, tmp_path):
+    """Remove one material from touching geometry, verify the other remains."""
+    input_file = touching_boxes["filename"]
+
+    # Check materials and volumes before removal
+    mats_before = di.get_materials_from_h5m(input_file, backend="pymoab")
+    vols_before = di.get_volumes_from_h5m(input_file, backend="pymoab")
+    assert "small_box" in mats_before
+    assert "big_box" in mats_before
+
+    output = str(tmp_path / f"removed_{backend}.h5m")
+    removed = di.remove_materials_from_h5m(
+        input_filename=input_file,
+        output_filename=output,
+        materials_to_remove="small_box",
+        backend=backend,
+    )
+    assert removed == ["small_box"]
+
+    mats_after = di.get_materials_from_h5m(output, backend="pymoab")
+    assert mats_after == ["big_box"]
+
+    vols_after = di.get_volumes_from_h5m(output, backend="pymoab")
+    assert len(vols_after) == 1
+
+    assert len(mats_after) < len(mats_before)
+    assert len(vols_after) < len(vols_before)
+
+
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+def test_remove_multiple_materials(separated_boxes, backend, tmp_path):
+    """Remove all materials, verify empty result."""
+    output = str(tmp_path / f"removed_all_{backend}.h5m")
+    removed = di.remove_materials_from_h5m(
+        input_filename=separated_boxes["filename"],
+        output_filename=output,
+        materials_to_remove=["box_a", "box_b"],
+        backend=backend,
+    )
+    assert removed == ["box_a", "box_b"]
+
+    # Use h5py to read (empty files may not be loadable by pymoab)
+    mats = di.get_materials_from_h5m(output, backend="h5py")
+    assert mats == []
+
+
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+def test_remove_material_string_input(separated_boxes, backend, tmp_path):
+    """Single string accepted for materials_to_remove."""
+    output = str(tmp_path / f"string_{backend}.h5m")
+    removed = di.remove_materials_from_h5m(
+        input_filename=separated_boxes["filename"],
+        output_filename=output,
+        materials_to_remove="box_b",
+        backend=backend,
+    )
+    assert removed == ["box_b"]
+    mats = di.get_materials_from_h5m(output, backend="pymoab")
+    assert mats == ["box_a"]
+
+
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+def test_remove_nonexistent_material_raises(separated_boxes, backend, tmp_path):
+    """ValueError when material not found."""
+    output = str(tmp_path / f"nope_{backend}.h5m")
+    with pytest.raises(ValueError, match="None of the specified materials"):
+        di.remove_materials_from_h5m(
+            input_filename=separated_boxes["filename"],
+            output_filename=output,
+            materials_to_remove="nonexistent",
+            backend=backend,
+        )
+
+
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+def test_remove_material_file_not_found(backend, tmp_path):
+    """FileNotFoundError for missing input."""
+    output = str(tmp_path / "out.h5m")
+    with pytest.raises(FileNotFoundError):
+        di.remove_materials_from_h5m(
+            input_filename="does_not_exist.h5m",
+            output_filename=output,
+            materials_to_remove="mat",
+            backend=backend,
+        )
+
+
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+def test_input_file_not_modified(separated_boxes, backend, tmp_path):
+    """Original file unchanged after removal."""
+    import hashlib
+
+    input_file = separated_boxes["filename"]
+    with open(input_file, "rb") as fh:
+        hash_before = hashlib.md5(fh.read()).hexdigest()
+
+    output = str(tmp_path / f"modified_check_{backend}.h5m")
+    di.remove_materials_from_h5m(
+        input_filename=input_file,
+        output_filename=output,
+        materials_to_remove="box_a",
+        backend=backend,
+    )
+
+    with open(input_file, "rb") as fh:
+        hash_after = hashlib.md5(fh.read()).hexdigest()
+
+    assert hash_before == hash_after
+
+
+def test_remove_materials_h5py_pymoab_consistency(touching_boxes, tmp_path):
+    """Both backends produce files with same materials and volumes."""
+    output_h5py = str(tmp_path / "h5py_out.h5m")
+    output_pymoab = str(tmp_path / "pymoab_out.h5m")
+
+    di.remove_materials_from_h5m(
+        input_filename=touching_boxes["filename"],
+        output_filename=output_h5py,
+        materials_to_remove="small_box",
+        backend="h5py",
+    )
+    di.remove_materials_from_h5m(
+        input_filename=touching_boxes["filename"],
+        output_filename=output_pymoab,
+        materials_to_remove="small_box",
+        backend="pymoab",
+    )
+
+    # Read each output with pymoab (which can read both formats)
+    mats_h5py = di.get_materials_from_h5m(output_h5py, backend="pymoab")
+    mats_pymoab = di.get_materials_from_h5m(output_pymoab, backend="pymoab")
+    assert mats_h5py == mats_pymoab
+
+    vols_h5py = di.get_volumes_from_h5m(output_h5py, backend="pymoab")
+    vols_pymoab = di.get_volumes_from_h5m(output_pymoab, backend="pymoab")
+    assert len(vols_h5py) == len(vols_pymoab)
+
+
+def test_output_readable_by_both_backends(separated_boxes, tmp_path):
+    """Output from h5py backend readable by pymoab and vice versa."""
+    output_h5py = str(tmp_path / "from_h5py.h5m")
+    di.remove_materials_from_h5m(
+        input_filename=separated_boxes["filename"],
+        output_filename=output_h5py,
+        materials_to_remove="box_a",
+        backend="h5py",
+    )
+
+    # h5py-written output should be readable by both backends
+    mats_via_h5py = di.get_materials_from_h5m(output_h5py, backend="h5py")
+    mats_via_pymoab = di.get_materials_from_h5m(output_h5py, backend="pymoab")
+    assert mats_via_h5py == mats_via_pymoab
+
+    output_pymoab = str(tmp_path / "from_pymoab.h5m")
+    di.remove_materials_from_h5m(
+        input_filename=separated_boxes["filename"],
+        output_filename=output_pymoab,
+        materials_to_remove="box_a",
+        backend="pymoab",
+    )
+
+    # pymoab-written output should be readable by pymoab
+    mats_via_pymoab2 = di.get_materials_from_h5m(output_pymoab, backend="pymoab")
+    assert mats_via_pymoab2 == ["box_b"]
+
+
+@requires_openmc
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+def test_remove_material_openmc_transport(touching_boxes, backend, tmp_path):
+    """Verify that the h5m file produced by remove_materials_from_h5m is a
+    valid DAGMC geometry by running OpenMC fixed-source particle transport
+    through it.
+    """
+    import openmc
+
+    output = str(tmp_path / f"transport_{backend}.h5m")
+    di.remove_materials_from_h5m(
+        input_filename=touching_boxes["filename"],
+        output_filename=output,
+        materials_to_remove="small_box",
+        backend=backend,
+    )
+
+    # Set up cross sections (H1 only)
+    xs_path = os.path.join(os.path.dirname(__file__), "ENDFB-7.1-NNDC_H1.h5")
+    xs_xml = str(tmp_path / "cross_sections.xml")
+    with open(xs_xml, "w") as fh:
+        fh.write(
+            '<?xml version="1.0" encoding="UTF-8"?>\n'
+            "<cross_sections>\n"
+            f'  <library materials="H1" path="{xs_path}" type="neutron"/>\n'
+            "</cross_sections>\n"
+        )
+    openmc.config["cross_sections"] = xs_xml
+
+    # Create material matching remaining "big_box"
+    mat = openmc.Material(name="big_box")
+    mat.add_nuclide("H1", 1.0, "ao")
+    mat.set_density("g/cm3", 0.001)
+    materials = openmc.Materials([mat])
+
+    # DAGMC geometry
+    dag_univ = openmc.DAGMCUniverse(filename=output)
+    bound_dag_univ = dag_univ.bounded_universe()
+    geometry = openmc.Geometry(root=bound_dag_univ)
+
+    # Point source near center of big_box
+    bb = di.get_bounding_box_from_h5m(output, materials="big_box")
+    center = bb.center
+    source = openmc.IndependentSource()
+    source.space = openmc.stats.Point(
+        (center[0] + 0.1, center[1] + 0.1, center[2] + 0.1)
+    )
+    source.angle = openmc.stats.Isotropic()
+    source.energy = openmc.stats.Discrete([14e6], [1])
+
+    settings = openmc.Settings()
+    settings.batches = 2
+    settings.particles = 1000
+    settings.inactive = 0
+    settings.run_mode = "fixed source"
+    settings.source = source
+
+    tally = openmc.Tally(name="flux")
+    tally.scores = ["flux"]
+
+    model = openmc.Model(
+        materials=materials,
+        geometry=geometry,
+        settings=settings,
+        tallies=openmc.Tallies([tally]),
+    )
+
+    original_dir = os.getcwd()
+    os.chdir(tmp_path)
+    try:
+        output_file = model.run(output=False)
+        sp = openmc.StatePoint(output_file)
+        flux = sp.get_tally(name="flux").mean.flatten()[0]
+        # Flux should be positive (particles traversed the geometry)
+        assert flux > 0
+    finally:
+        os.chdir(original_dir)
 
 
 @pytest.mark.parametrize("filename", H5M_TEST_FILES)

@@ -222,6 +222,49 @@ di.convert_h5m_to_vtkhdf(h5m_filename='dagmc.h5m', vtkhdf_filename= 'dagmc.vtkhd
 
 
 
+## Removing materials from h5m files
+
+Remove one or more materials (and their associated volumes) from a DAGMC h5m file,
+writing the result to a new file.
+
+```python
+import dagmc_h5m_file_inspector as di
+
+di.get_materials_from_h5m("dagmc.h5m")
+
+>>> ['big_box', 'small_box']
+
+# Remove a single material
+di.remove_materials_from_h5m(
+    input_filename="dagmc.h5m",
+    output_filename="dagmc_reduced.h5m",
+    materials_to_remove="small_box",
+)
+
+di.get_materials_from_h5m("dagmc_reduced.h5m")
+
+>>> ['big_box']
+```
+
+```python
+import dagmc_h5m_file_inspector as di
+
+di.get_materials_from_h5m("reactor.h5m")
+
+>>> ['blanket', 'first_wall', 'shield']
+
+# Remove multiple materials
+di.remove_materials_from_h5m(
+    input_filename="reactor.h5m",
+    output_filename="reactor_reduced.h5m",
+    materials_to_remove=["blanket", "shield"],
+)
+
+di.get_materials_from_h5m("reactor_reduced.h5m")
+
+>>> ['first_wall']
+```
+
 ## Using the pymoab backend
 
 All functions support an optional `backend` parameter. The default is `"h5py"`,
