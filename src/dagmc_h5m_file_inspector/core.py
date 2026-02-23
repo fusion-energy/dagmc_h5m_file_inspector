@@ -962,19 +962,8 @@ def _write_h5m(
 
         # === ELEMENTS ===
         elements = tstt.create_group("elements")
-        elems = {
-            "Edge": 1,
-            "Tri": 2,
-            "Quad": 3,
-            "Polygon": 4,
-            "Tet": 5,
-            "Pyramid": 6,
-            "Prism": 7,
-            "Knife": 8,
-            "Hex": 9,
-            "Polyhedron": 10,
-        }
-        tstt["elemtypes"] = h5py.enum_dtype(elems)
+        elem_enum = {"Tri": 2}
+        tstt["elemtypes"] = h5py.enum_dtype(elem_enum)
 
         now = datetime.now()
         tstt.create_dataset(
@@ -987,7 +976,9 @@ def _write_h5m(
         )
 
         tri3_group = elements.create_group("Tri3")
-        tri3_group.attrs.create("element_type", elems["Tri"], dtype=tstt["elemtypes"])
+        tri3_group.attrs.create(
+            "element_type", elem_enum["Tri"], dtype=tstt["elemtypes"]
+        )
         connectivity_ds = tri3_group.create_dataset(
             "connectivity",
             data=triangles_arr + 1,  # 1-based vertex IDs in h5m

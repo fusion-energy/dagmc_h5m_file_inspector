@@ -1167,23 +1167,33 @@ def test_convert_h5m_to_vtkhdf_file_not_found():
 
 
 @pytest.mark.parametrize("backend", ["h5py", "pymoab"])
-def test_remove_single_material(separated_boxes, backend, tmp_path):
-    """Remove one material, verify the other remains."""
+def test_remove_single_material(touching_boxes, backend, tmp_path):
+    """Remove one material from touching geometry, verify the other remains."""
+    input_file = touching_boxes["filename"]
+
+    # Check materials and volumes before removal
+    mats_before = di.get_materials_from_h5m(input_file, backend="pymoab")
+    vols_before = di.get_volumes_from_h5m(input_file, backend="pymoab")
+    assert "small_box" in mats_before
+    assert "big_box" in mats_before
+
     output = str(tmp_path / f"removed_{backend}.h5m")
     removed = di.remove_materials_from_h5m(
-        input_filename=separated_boxes["filename"],
+        input_filename=input_file,
         output_filename=output,
-        materials_to_remove="box_a",
+        materials_to_remove="small_box",
         backend=backend,
     )
-    assert removed == ["box_a"]
+    assert removed == ["small_box"]
 
-    # Output should only contain box_b (use pymoab to read — it handles both formats)
-    mats = di.get_materials_from_h5m(output, backend="pymoab")
-    assert mats == ["box_b"]
+    mats_after = di.get_materials_from_h5m(output, backend="pymoab")
+    assert mats_after == ["big_box"]
 
-    vols = di.get_volumes_from_h5m(output, backend="pymoab")
-    assert len(vols) == 1
+    vols_after = di.get_volumes_from_h5m(output, backend="pymoab")
+    assert len(vols_after) == 1
+
+    assert len(mats_after) < len(mats_before)
+    assert len(vols_after) < len(vols_before)
 
 
 @pytest.mark.parametrize("backend", ["h5py", "pymoab"])
@@ -1267,21 +1277,21 @@ def test_input_file_not_modified(separated_boxes, backend, tmp_path):
     assert hash_before == hash_after
 
 
-def test_remove_materials_h5py_pymoab_consistency(separated_boxes, tmp_path):
+def test_remove_materials_h5py_pymoab_consistency(touching_boxes, tmp_path):
     """Both backends produce files with same materials and volumes."""
     output_h5py = str(tmp_path / "h5py_out.h5m")
     output_pymoab = str(tmp_path / "pymoab_out.h5m")
 
     di.remove_materials_from_h5m(
-        input_filename=separated_boxes["filename"],
+        input_filename=touching_boxes["filename"],
         output_filename=output_h5py,
-        materials_to_remove="box_a",
+        materials_to_remove="small_box",
         backend="h5py",
     )
     di.remove_materials_from_h5m(
-        input_filename=separated_boxes["filename"],
+        input_filename=touching_boxes["filename"],
         output_filename=output_pymoab,
-        materials_to_remove="box_a",
+        materials_to_remove="small_box",
         backend="pymoab",
     )
 
@@ -1325,7 +1335,7 @@ def test_output_readable_by_both_backends(separated_boxes, tmp_path):
 
 @requires_openmc
 @pytest.mark.parametrize("backend", ["h5py", "pymoab"])
-def test_remove_material_openmc_transport(separated_boxes, backend, tmp_path):
+def test_remove_material_openmc_transport(touching_boxes, backend, tmp_path):
     """Verify that the h5m file produced by remove_materials_from_h5m is a
     valid DAGMC geometry by running OpenMC fixed-source particle transport
     through it.
@@ -1334,9 +1344,9 @@ def test_remove_material_openmc_transport(separated_boxes, backend, tmp_path):
 
     output = str(tmp_path / f"transport_{backend}.h5m")
     di.remove_materials_from_h5m(
-        input_filename=separated_boxes["filename"],
+        input_filename=touching_boxes["filename"],
         output_filename=output,
-        materials_to_remove="box_a",
+        materials_to_remove="small_box",
         backend=backend,
     )
 
@@ -1352,8 +1362,8 @@ def test_remove_material_openmc_transport(separated_boxes, backend, tmp_path):
         )
     openmc.config["cross_sections"] = xs_xml
 
-    # Create material matching remaining "box_b"
-    mat = openmc.Material(name="box_b")
+    # Create material matching remaining "big_box"
+    mat = openmc.Material(name="big_box")
     mat.add_nuclide("H1", 1.0, "ao")
     mat.set_density("g/cm3", 0.001)
     materials = openmc.Materials([mat])
@@ -1363,8 +1373,8 @@ def test_remove_material_openmc_transport(separated_boxes, backend, tmp_path):
     bound_dag_univ = dag_univ.bounded_universe()
     geometry = openmc.Geometry(root=bound_dag_univ)
 
-    # Point source near center of box_b
-    bb = di.get_bounding_box_from_h5m(output, materials="box_b")
+    # Point source near center of big_box
+    bb = di.get_bounding_box_from_h5m(output, materials="big_box")
     center = bb.center
     source = openmc.IndependentSource()
     source.space = openmc.stats.Point(
