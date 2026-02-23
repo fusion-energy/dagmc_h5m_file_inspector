@@ -1,17 +1,27 @@
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Literal, Sequence, Tuple, Union
+from typing import Dict, List, Literal, Optional, Sequence, Tuple, Union
 
 import h5py
 import numpy as np
 
-
 RANGE_COMPRESSED_FLAG = 0x8
+
+_VALID_BACKENDS = ("h5py", "pymoab")
+
+
+def _validate_backend(backend: str) -> None:
+    """Raise ValueError if *backend* is not a recognised backend string."""
+    if backend not in _VALID_BACKENDS:
+        raise ValueError(
+            f"Invalid backend {backend!r}. Must be one of {_VALID_BACKENDS}."
+        )
 
 
 @dataclass(frozen=True)
 class _SetInfo:
     """Internal dataclass for storing MOAB set information."""
+
     handle: int
     contents: Sequence[int] | Sequence[Tuple[int, int]]
     contents_are_ranges: bool
@@ -19,9 +29,12 @@ class _SetInfo:
     parents: Sequence[int]
     flags: int
 
-# This is a reimplementation of the BoundingBox class is mainly API compatible with OpenMc
-# One difference is that this one does not make any use of Numpy
-# TODO if openmc becomes pip installable then we could make use of the openmc BoundingBox directly
+
+# This is a reimplementation of the BoundingBox class that is mainly
+# API compatible with OpenMC. One difference is that this one does not
+# make any use of Numpy.
+# TODO if openmc becomes pip installable then we could make use of
+# the openmc BoundingBox directly
 class BoundingBox:
     """Axis-aligned bounding box.
 
@@ -41,20 +54,26 @@ class BoundingBox:
         new &= other
         return new
 
-    def __contains__(self, other):
+    def __contains__(self, other: object) -> bool:
         """Check if a point or BoundingBox is inside the bounding box."""
         if isinstance(other, BoundingBox):
             return all(
                 a <= p <= b
-                for p, a, b in zip(other._lower_left, self._lower_left, self._upper_right)
+                for p, a, b in zip(
+                    other._lower_left, self._lower_left, self._upper_right
+                )
             ) and all(
                 a <= p <= b
-                for p, a, b in zip(other._upper_right, self._lower_left, self._upper_right)
+                for p, a, b in zip(
+                    other._upper_right, self._lower_left, self._upper_right
+                )
             )
         point = tuple(float(v) for v in other)
         if len(point) != 3:
             raise ValueError(f"point must have length 3, got {len(point)}")
-        return all(a <= p <= b for p, a, b in zip(point, self._lower_left, self._upper_right))
+        return all(
+            a <= p <= b for p, a, b in zip(point, self._lower_left, self._upper_right)
+        )
 
     def __getitem__(self, key) -> Tuple[float, float, float]:
         """Index into the bounding box (0=lower_left, 1=upper_right)."""
@@ -64,24 +83,36 @@ class BoundingBox:
         """In-place intersection of two bounding boxes."""
         if not isinstance(other, BoundingBox):
             return NotImplemented
-        self._lower_left = tuple(max(a, b) for a, b in zip(self._lower_left, other._lower_left))
-        self._upper_right = tuple(min(a, b) for a, b in zip(self._upper_right, other._upper_right))
+        self._lower_left = tuple(
+            max(a, b) for a, b in zip(self._lower_left, other._lower_left)
+        )
+        self._upper_right = tuple(
+            min(a, b) for a, b in zip(self._upper_right, other._upper_right)
+        )
         return self
 
-    def __init__(self, lower_left, upper_right):
+    def __init__(self, lower_left: object, upper_right: object) -> None:
         self._lower_left = tuple(float(v) for v in lower_left)
         self._upper_right = tuple(float(v) for v in upper_right)
         if len(self._lower_left) != 3:
-            raise ValueError(f"lower_left must have length 3, got {len(self._lower_left)}")
+            raise ValueError(
+                f"lower_left must have length 3, got {len(self._lower_left)}"
+            )
         if len(self._upper_right) != 3:
-            raise ValueError(f"upper_right must have length 3, got {len(self._upper_right)}")
+            raise ValueError(
+                f"upper_right must have length 3, got {len(self._upper_right)}"
+            )
 
     def __ior__(self, other: "BoundingBox") -> "BoundingBox":
         """In-place union of two bounding boxes."""
         if not isinstance(other, BoundingBox):
             return NotImplemented
-        self._lower_left = tuple(min(a, b) for a, b in zip(self._lower_left, other._lower_left))
-        self._upper_right = tuple(max(a, b) for a, b in zip(self._upper_right, other._upper_right))
+        self._lower_left = tuple(
+            min(a, b) for a, b in zip(self._lower_left, other._lower_left)
+        )
+        self._upper_right = tuple(
+            max(a, b) for a, b in zip(self._upper_right, other._upper_right)
+        )
         return self
 
     def __len__(self) -> int:
@@ -99,7 +130,7 @@ class BoundingBox:
     def __repr__(self) -> str:
         return f"BoundingBox({self._lower_left}, {self._upper_right})"
 
-    def __setitem__(self, key, val):
+    def __setitem__(self, key: int, val: object) -> None:
         """Set lower_left (0) or upper_right (1) by index."""
         val = tuple(float(v) for v in val)
         if key == 0:
@@ -129,7 +160,9 @@ class BoundingBox:
         except TypeError:
             pad = (float(padding),) * 3
         if len(pad) != 3:
-            raise ValueError(f"padding must be scalar or length 3, got length {len(pad)}")
+            raise ValueError(
+                f"padding must be scalar or length 3, got length {len(pad)}"
+            )
         ll = tuple(a - p for a, p in zip(self._lower_left, pad))
         ur = tuple(a + p for a, p in zip(self._upper_right, pad))
         if inplace:
@@ -145,15 +178,15 @@ class BoundingBox:
         parameter."""
         ll, ur = self._lower_left, self._upper_right
         return {
-            'xy': (ll[0], ur[0], ll[1], ur[1]),
-            'xz': (ll[0], ur[0], ll[2], ur[2]),
-            'yz': (ll[1], ur[1], ll[2], ur[2]),
+            "xy": (ll[0], ur[0], ll[1], ur[1]),
+            "xz": (ll[0], ur[0], ll[2], ur[2]),
+            "yz": (ll[1], ur[1], ll[2], ur[2]),
         }
 
     @classmethod
     def infinite(cls):
         """Return an infinite bounding box."""
-        return cls((-float('inf'),) * 3, (float('inf'),) * 3)
+        return cls((-float("inf"),) * 3, (float("inf"),) * 3)
 
     @property
     def lower_left(self) -> Tuple[float, float, float]:
@@ -222,7 +255,9 @@ def _get_materials_h5py(filename: str, remove_prefix: bool) -> List[str]:
         return sorted(set(materials_list))
 
 
-def _get_volumes_and_materials_h5py(filename: str, remove_prefix: bool) -> dict:
+def _get_volumes_and_materials_h5py(
+    filename: str, remove_prefix: bool
+) -> Dict[int, str]:
     """Get volume-to-material mapping using h5py backend."""
     with h5py.File(filename, "r") as f:
         global_ids = f["tstt/sets/tags/GLOBAL_ID"][()]
@@ -360,8 +395,7 @@ def _read_sets_h5py(f: h5py.File) -> List[_SetInfo]:
                         f"has odd length {len(data)}"
                     )
                 contents_data = [
-                    (int(data[i]), int(data[i + 1]))
-                    for i in range(0, len(data), 2)
+                    (int(data[i]), int(data[i + 1])) for i in range(0, len(data), 2)
                 ]
                 contents_are_ranges = True
             else:
@@ -434,10 +468,7 @@ def _read_geom_sense_h5py(f: h5py.File) -> Dict[int, Tuple[int, int]]:
 
     ids = tag_group["id_list"][...]
     values = tag_group["values"][...]
-    return {
-        int(h): (int(v[0]), int(v[1]))
-        for h, v in zip(ids, values)
-    }
+    return {int(h): (int(v[0]), int(v[1])) for h, v in zip(ids, values)}
 
 
 def _expand_set_contents(
@@ -500,10 +531,7 @@ def _tri_indices_for_set(
             indices.extend(range(start - tri_start, end - tri_start + 1))
         return np.asarray(indices, dtype=np.int64)
 
-    handles = [
-        h for h in set_info.contents
-        if tri_start <= h <= tri_end
-    ]
+    handles = [h for h in set_info.contents if tri_start <= h <= tri_end]
     if not handles:
         return np.array([], dtype=np.int64)
     return np.asarray(handles, dtype=np.int64) - tri_start
@@ -542,7 +570,8 @@ def _volume_for_volume_set(
         surfaces = [h for h in volume_set.children if h in surface_handles]
     else:
         surfaces = [
-            h for h in surface_handles
+            h
+            for h in surface_handles
             if h in geom_sense and vol_handle in geom_sense[h]
         ]
 
@@ -572,7 +601,7 @@ def _volume_for_volume_set(
     return total
 
 
-def _get_volumes_sizes_h5py(filename: str) -> dict:
+def _get_volumes_sizes_h5py(filename: str) -> Dict[int, float]:
     """Get geometric volume sizes for each volume ID using h5py backend.
 
     Uses the parent-child relationships (Volume -> Surfaces) and GEOM_SENSE_2
@@ -608,24 +637,12 @@ def _get_volumes_sizes_h5py(filename: str) -> dict:
             global_ids = _read_tag_h5py(f, "GLOBAL_ID")
 
         # Build set of surface handles
-        surface_handles = {
-            h
-            for h, cat in categories.items()
-            if cat == "Surface"
-        }
-        surface_handles.update(
-            h for h, dim in geom_dim.items() if dim == 2
-        )
+        surface_handles = {h for h, cat in categories.items() if cat == "Surface"}
+        surface_handles.update(h for h, dim in geom_dim.items() if dim == 2)
 
         # Build set of volume handles
-        volume_handles = {
-            h
-            for h, cat in categories.items()
-            if cat == "Volume"
-        }
-        volume_handles.update(
-            h for h, dim in geom_dim.items() if dim == 3
-        )
+        volume_handles = {h for h, cat in categories.items() if cat == "Volume"}
+        volume_handles.update(h for h, dim in geom_dim.items() if dim == 3)
 
         volume_sizes = {}
         for vol_handle in volume_handles:
@@ -653,7 +670,7 @@ def _get_volumes_sizes_h5py(filename: str) -> dict:
 # ============================================================================
 
 
-def _check_pymoab_available():
+def _check_pymoab_available() -> None:
     """Check if pymoab is available and raise ImportError if not."""
     try:
         import pymoab  # noqa: F401
@@ -664,9 +681,8 @@ def _check_pymoab_available():
         )
 
 
-def _load_moab_file(filename: str):
+def _load_moab_file(filename: str) -> object:
     """Load a DAGMC h5m file into a pymoab Core object."""
-    import pymoab as mb
     from pymoab import core
 
     moab_core = core.Core()
@@ -674,7 +690,7 @@ def _load_moab_file(filename: str):
     return moab_core
 
 
-def _get_groups_pymoab(mbcore):
+def _get_groups_pymoab(mbcore: object) -> object:
     """Get group entities using pymoab."""
     import pymoab as mb
 
@@ -727,7 +743,9 @@ def _get_materials_pymoab(filename: str, remove_prefix: bool) -> List[str]:
     return sorted(set(materials_list))
 
 
-def _get_volumes_and_materials_pymoab(filename: str, remove_prefix: bool) -> dict:
+def _get_volumes_and_materials_pymoab(
+    filename: str, remove_prefix: bool
+) -> Dict[int, str]:
     """Get volume-to-material mapping using pymoab backend."""
     import pymoab as mb
 
@@ -766,7 +784,9 @@ def _get_bounding_box_pymoab(filename: str) -> BoundingBox:
     return BoundingBox(lower_left, upper_right)
 
 
-def _get_triangle_conn_and_coords_h5py(filename: str) -> Dict[int, Tuple[np.ndarray, np.ndarray]]:
+def _get_triangle_conn_and_coords_h5py(
+    filename: str,
+) -> Dict[int, Tuple[np.ndarray, np.ndarray]]:
     """Get triangle connectivity and coordinates for each volume using h5py backend.
 
     Returns a dictionary mapping volume IDs to tuples of (connectivity, coordinates)
@@ -798,20 +818,12 @@ def _get_triangle_conn_and_coords_h5py(filename: str) -> Dict[int, Tuple[np.ndar
             global_ids = _read_tag_h5py(f, "GLOBAL_ID")
 
         # Build set of surface handles
-        surface_handles = {
-            h for h, cat in categories.items() if cat == "Surface"
-        }
-        surface_handles.update(
-            h for h, dim in geom_dim.items() if dim == 2
-        )
+        surface_handles = {h for h, cat in categories.items() if cat == "Surface"}
+        surface_handles.update(h for h, dim in geom_dim.items() if dim == 2)
 
         # Build set of volume handles
-        volume_handles = {
-            h for h, cat in categories.items() if cat == "Volume"
-        }
-        volume_handles.update(
-            h for h, dim in geom_dim.items() if dim == 3
-        )
+        volume_handles = {h for h, cat in categories.items() if cat == "Volume"}
+        volume_handles.update(h for h, dim in geom_dim.items() if dim == 3)
 
         result: Dict[int, Tuple[np.ndarray, np.ndarray]] = {}
 
@@ -876,7 +888,9 @@ def _get_triangle_conn_and_coords_h5py(filename: str) -> Dict[int, Tuple[np.ndar
         return result
 
 
-def _get_triangle_conn_and_coords_pymoab(filename: str) -> Dict[int, Tuple[np.ndarray, np.ndarray]]:
+def _get_triangle_conn_and_coords_pymoab(
+    filename: str,
+) -> Dict[int, Tuple[np.ndarray, np.ndarray]]:
     """Get triangle connectivity and coordinates for each volume using pymoab backend.
 
     Returns a dictionary mapping volume IDs to tuples of (connectivity, coordinates)
@@ -885,7 +899,6 @@ def _get_triangle_conn_and_coords_pymoab(filename: str) -> Dict[int, Tuple[np.nd
     coordinates array for that volume.
     """
     import pymoab as mb
-    from pymoab import types
 
     mbcore = _load_moab_file(filename)
     category_tag = mbcore.tag_get_handle(mb.types.CATEGORY_TAG_NAME)
@@ -940,14 +953,13 @@ def _get_triangle_conn_and_coords_pymoab(filename: str) -> Dict[int, Tuple[np.nd
     return result
 
 
-def _get_volumes_sizes_pymoab(filename: str) -> dict:
+def _get_volumes_sizes_pymoab(filename: str) -> Dict[int, float]:
     """Get geometric volume sizes for each volume ID using pymoab backend.
 
     Uses GEOM_SENSE_2 tag to determine surface orientation relative to each
     volume, enabling correct signed volume calculation for nested geometries.
     """
     import pymoab as mb
-    from pymoab import types
 
     mbcore = _load_moab_file(filename)
     category_tag = mbcore.tag_get_handle(mb.types.CATEGORY_TAG_NAME)
@@ -1048,14 +1060,14 @@ def get_volumes_from_h5m(
     Returns:
         A list of volume ids
     """
+    _validate_backend(backend)
     if not Path(filename).is_file():
         raise FileNotFoundError(f"filename provided ({filename}) does not exist")
 
     if backend == "pymoab":
         _check_pymoab_available()
         return _get_volumes_pymoab(filename)
-    else:
-        return _get_volumes_h5py(filename)
+    return _get_volumes_h5py(filename)
 
 
 def get_materials_from_h5m(
@@ -1073,21 +1085,21 @@ def get_materials_from_h5m(
     Returns:
         A list of material tags
     """
+    _validate_backend(backend)
     if not Path(filename).is_file():
         raise FileNotFoundError(f"filename provided ({filename}) does not exist")
 
     if backend == "pymoab":
         _check_pymoab_available()
         return _get_materials_pymoab(filename, remove_prefix)
-    else:
-        return _get_materials_h5py(filename, remove_prefix)
+    return _get_materials_h5py(filename, remove_prefix)
 
 
 def get_volumes_and_materials_from_h5m(
     filename: str,
     remove_prefix: Optional[bool] = True,
     backend: Literal["h5py", "pymoab"] = "h5py",
-) -> dict:
+) -> Dict[int, str]:
     """Reads in a DAGMC h5m file and finds the volume ids with their
     associated material tags.
 
@@ -1099,14 +1111,14 @@ def get_volumes_and_materials_from_h5m(
     Returns:
         A dictionary of volume ids and material tags
     """
+    _validate_backend(backend)
     if not Path(filename).is_file():
         raise FileNotFoundError(f"filename provided ({filename}) does not exist")
 
     if backend == "pymoab":
         _check_pymoab_available()
         return _get_volumes_and_materials_pymoab(filename, remove_prefix)
-    else:
-        return _get_volumes_and_materials_h5py(filename, remove_prefix)
+    return _get_volumes_and_materials_h5py(filename, remove_prefix)
 
 
 def get_bounding_box_from_h5m(
@@ -1128,6 +1140,7 @@ def get_bounding_box_from_h5m(
     Returns:
         A BoundingBox object representing the axis-aligned bounding box.
     """
+    _validate_backend(backend)
     if not Path(filename).is_file():
         raise FileNotFoundError(f"filename provided ({filename}) does not exist")
 
@@ -1135,8 +1148,7 @@ def get_bounding_box_from_h5m(
         if backend == "pymoab":
             _check_pymoab_available()
             return _get_bounding_box_pymoab(filename)
-        else:
-            return _get_bounding_box_h5py(filename)
+        return _get_bounding_box_h5py(filename)
 
     if isinstance(materials, str):
         materials = [materials]
@@ -1148,8 +1160,7 @@ def get_bounding_box_from_h5m(
     )
 
     matching_vol_ids = [
-        vol_id for vol_id, mat_name in vol_mat_mapping.items()
-        if mat_name in materials
+        vol_id for vol_id, mat_name in vol_mat_mapping.items() if mat_name in materials
     ]
 
     if not matching_vol_ids:
@@ -1164,10 +1175,13 @@ def get_bounding_box_from_h5m(
         backend=backend,
     )
 
-    all_coords = np.concatenate([
-        vol_data[vol_id][1] for vol_id in matching_vol_ids
-        if vol_id in vol_data and vol_data[vol_id][1].size > 0
-    ])
+    all_coords = np.concatenate(
+        [
+            vol_data[vol_id][1]
+            for vol_id in matching_vol_ids
+            if vol_id in vol_data and vol_data[vol_id][1].size > 0
+        ]
+    )
 
     lower_left = all_coords.min(axis=0)
     upper_right = all_coords.max(axis=0)
@@ -1177,7 +1191,7 @@ def get_bounding_box_from_h5m(
 def get_volumes_from_h5m_by_cell_id(
     filename: str,
     backend: Literal["h5py", "pymoab"] = "h5py",
-) -> dict:
+) -> Dict[int, float]:
     """Reads in a DAGMC h5m file and calculates the geometric volume
     (size) of each volume entity.
 
@@ -1188,14 +1202,14 @@ def get_volumes_from_h5m_by_cell_id(
     Returns:
         A dictionary mapping volume IDs (cell IDs) to their geometric volumes (sizes)
     """
+    _validate_backend(backend)
     if not Path(filename).is_file():
         raise FileNotFoundError(f"filename provided ({filename}) does not exist")
 
     if backend == "pymoab":
         _check_pymoab_available()
         return _get_volumes_sizes_pymoab(filename)
-    else:
-        return _get_volumes_sizes_h5py(filename)
+    return _get_volumes_sizes_h5py(filename)
 
 
 def get_volumes_from_h5m_by_material_name(
@@ -1213,6 +1227,7 @@ def get_volumes_from_h5m_by_material_name(
         A dictionary mapping material names to their total geometric volumes.
         If a material is assigned to multiple cells, their volumes are summed.
     """
+    _validate_backend(backend)
     if not Path(filename).is_file():
         raise FileNotFoundError(f"filename provided ({filename}) does not exist")
 
@@ -1251,6 +1266,7 @@ def get_volumes_from_h5m_by_cell_id_and_material_name(
     Returns:
         A dictionary mapping (cell_id, material_name) tuples to their geometric volumes.
     """
+    _validate_backend(backend)
     if not Path(filename).is_file():
         raise FileNotFoundError(f"filename provided ({filename}) does not exist")
 
@@ -1274,7 +1290,7 @@ def get_volumes_from_h5m_by_cell_id_and_material_name(
 
 
 def set_openmc_material_volumes_from_h5m(
-    materials: Union[List, "openmc.Materials"],
+    materials: Union[List, object],
     filename: str,
     backend: Literal["h5py", "pymoab"] = "h5py",
 ) -> None:
@@ -1306,6 +1322,7 @@ def set_openmc_material_volumes_from_h5m(
         >>> set_openmc_material_volumes_from_h5m(materials, 'dagmc.h5m')
         >>> print(steel.volume)  # Volume is now set
     """
+    _validate_backend(backend)
     if not Path(filename).is_file():
         raise FileNotFoundError(f"filename provided ({filename}) does not exist")
 
@@ -1354,6 +1371,7 @@ def convert_h5m_to_vtkhdf(
     Returns:
         The path to the written vtkhdf file.
     """
+    _validate_backend(backend)
     if not Path(h5m_filename).is_file():
         raise FileNotFoundError(f"filename provided ({h5m_filename}) does not exist")
 
@@ -1443,12 +1461,8 @@ def _write_vtkhdf(
             dtype=h5py.string_dtype("ascii", len(ascii_type)),
         )
 
-        root.create_dataset(
-            "NumberOfPoints", data=np.array([n_points], dtype=np.int64)
-        )
-        root.create_dataset(
-            "NumberOfCells", data=np.array([n_cells], dtype=np.int64)
-        )
+        root.create_dataset("NumberOfPoints", data=np.array([n_points], dtype=np.int64))
+        root.create_dataset("NumberOfCells", data=np.array([n_cells], dtype=np.int64))
         root.create_dataset(
             "NumberOfConnectivityIds",
             data=np.array([n_connectivity_ids], dtype=np.int64),
@@ -1469,15 +1483,11 @@ def _write_vtkhdf(
 
         cell_data = root.create_group("CellData")
         cell_data.create_dataset("cell_id", data=cell_ids.astype(np.int32))
-        cell_data.create_dataset(
-            "material_id", data=material_ids.astype(np.int32)
-        )
+        cell_data.create_dataset("material_id", data=material_ids.astype(np.int32))
 
         field_data = root.create_group("FieldData")
         dt = h5py.string_dtype()
-        field_data.create_dataset(
-            "material_names", data=material_names, dtype=dt
-        )
+        field_data.create_dataset("material_names", data=material_names, dtype=dt)
 
 
 def get_triangle_conn_and_coords_by_volume(
@@ -1487,8 +1497,9 @@ def get_triangle_conn_and_coords_by_volume(
     """Reads a DAGMC h5m file and extracts triangle connectivity and coordinates
     for each volume.
 
-    This function provides the same data as pydagmc's volume.get_triangle_conn_and_coords()
-    method, returning the triangle mesh data for each volume in the geometry.
+    This function provides the same data as pydagmc's
+    ``volume.get_triangle_conn_and_coords()`` method, returning the
+    triangle mesh data for each volume in the geometry.
 
     Arguments:
         filename: the filename of the DAGMC h5m file
@@ -1505,13 +1516,14 @@ def get_triangle_conn_and_coords_by_volume(
         >>> import dagmc_h5m_file_inspector as di
         >>> data = di.get_triangle_conn_and_coords_by_volume("dagmc.h5m")
         >>> for vol_id, (connectivity, coords) in data.items():
-        ...     print(f"Volume {vol_id}: {len(connectivity)} triangles, {len(coords)} vertices")
+        ...     n_tri, n_vert = len(connectivity), len(coords)
+        ...     print(f"Volume {vol_id}: {n_tri} triangles, {n_vert} vertices")
     """
+    _validate_backend(backend)
     if not Path(filename).is_file():
         raise FileNotFoundError(f"filename provided ({filename}) does not exist")
 
     if backend == "pymoab":
         _check_pymoab_available()
         return _get_triangle_conn_and_coords_pymoab(filename)
-    else:
-        return _get_triangle_conn_and_coords_h5py(filename)
+    return _get_triangle_conn_and_coords_h5py(filename)

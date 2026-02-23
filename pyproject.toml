@@ -26,9 +26,6 @@ Homepage = "https://github.com/fusion-energy/dagmc_h5m_file_inspector"
 Source = "https://github.com/fusion-energy/dagmc_h5m_file_inspector"
 Tracker = "https://github.com/fusion-energy/dagmc_h5m_file_inspector/issues"
 
-[project.scripts]
-inspect-dagmc-h5m-file = "dagmc_h5m_file_inspector.cli:main"
-
 [project.optional-dependencies]
 pymoab = [
     "pymoab",
@@ -45,3 +42,9 @@ where = ["src"]
 
 [tool.setuptools_scm]
 write_to = "src/dagmc_h5m_file_inspector/_version.py"
+
+[tool.ruff]
+target-version = "py38"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
