@@ -1610,3 +1610,232 @@ def test_surface_area_by_material_name_rectangle(rectangle_geometry, backend):
     assert sum(areas) == pytest.approx(
         rectangle_geometry["expected_total_surface_area"], rel=1e-10
     )
+
+
+# ============================================================================
+# Tests for rotate_around_axis
+# ============================================================================
+
+
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+def test_rotate_around_axis_z(rectangle_geometry, tmp_path, backend):
+    """Rotating a 10x20x30 rectangle 90 deg around z swaps x/y extents."""
+    output = str(tmp_path / "rotated_z.h5m")
+    di.rotate_around_axis(
+        filename=rectangle_geometry["filename"],
+        axis="z",
+        degrees=90,
+        output=output,
+        backend=backend,
+    )
+    bbox = di.get_bounding_box_from_h5m(output)
+    # Original: x in [-5, 5] (width 10), y in [-10, 10] (width 20)
+    # After 90-deg z rotation: x-width should become ~20, y-width should become ~10
+    assert bbox.width[0] == pytest.approx(20.0, rel=1e-6)
+    assert bbox.width[1] == pytest.approx(10.0, rel=1e-6)
+    assert bbox.width[2] == pytest.approx(30.0, rel=1e-6)
+
+
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+def test_rotate_around_axis_x(rectangle_geometry, tmp_path, backend):
+    """Rotating a 10x20x30 rectangle 90 deg around x swaps y/z extents."""
+    output = str(tmp_path / "rotated_x.h5m")
+    di.rotate_around_axis(
+        filename=rectangle_geometry["filename"],
+        axis="x",
+        degrees=90,
+        output=output,
+        backend=backend,
+    )
+    bbox = di.get_bounding_box_from_h5m(output)
+    # Original: y in [-10, 10] (width 20), z in [-15, 15] (width 30)
+    # After 90-deg x rotation: y-width should become ~30, z-width should become ~20
+    assert bbox.width[0] == pytest.approx(10.0, rel=1e-6)
+    assert bbox.width[1] == pytest.approx(30.0, rel=1e-6)
+    assert bbox.width[2] == pytest.approx(20.0, rel=1e-6)
+
+
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+def test_rotate_around_axis_y(rectangle_geometry, tmp_path, backend):
+    """Rotating a 10x20x30 rectangle 90 deg around y swaps x/z extents."""
+    output = str(tmp_path / "rotated_y.h5m")
+    di.rotate_around_axis(
+        filename=rectangle_geometry["filename"],
+        axis="y",
+        degrees=90,
+        output=output,
+        backend=backend,
+    )
+    bbox = di.get_bounding_box_from_h5m(output)
+    # Original: x in [-5, 5] (width 10), z in [-15, 15] (width 30)
+    # After 90-deg y rotation: x-width should become ~30, z-width should become ~10
+    assert bbox.width[0] == pytest.approx(30.0, rel=1e-6)
+    assert bbox.width[1] == pytest.approx(20.0, rel=1e-6)
+    assert bbox.width[2] == pytest.approx(10.0, rel=1e-6)
+
+
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+def test_rotate_around_axis_360(rectangle_geometry, tmp_path, backend):
+    """A 360-degree rotation should leave the bounding box unchanged."""
+    output = str(tmp_path / "rotated_360.h5m")
+    di.rotate_around_axis(
+        filename=rectangle_geometry["filename"],
+        axis="z",
+        degrees=360,
+        output=output,
+        backend=backend,
+    )
+    original_bbox = di.get_bounding_box_from_h5m(rectangle_geometry["filename"])
+    rotated_bbox = di.get_bounding_box_from_h5m(output)
+    for i in range(3):
+        assert rotated_bbox.width[i] == pytest.approx(original_bbox.width[i], rel=1e-6)
+
+
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+def test_rotate_around_axis_materials_preserved(rectangle_geometry, tmp_path, backend):
+    """Materials should be unchanged after rotation."""
+    output = str(tmp_path / "rotated_mats.h5m")
+    di.rotate_around_axis(
+        filename=rectangle_geometry["filename"],
+        axis="z",
+        degrees=45,
+        output=output,
+        backend=backend,
+    )
+    original_mats = di.get_materials_from_h5m(rectangle_geometry["filename"])
+    rotated_mats = di.get_materials_from_h5m(output)
+    assert original_mats == rotated_mats
+
+
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+def test_rotate_around_axis_invalid_axis(rectangle_geometry, backend):
+    """An invalid axis should raise ValueError."""
+    with pytest.raises(ValueError, match="Invalid axis"):
+        di.rotate_around_axis(
+            filename=rectangle_geometry["filename"],
+            axis="a",
+            backend=backend,
+        )
+
+
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+def test_rotate_around_axis_file_not_found(backend):
+    """A missing file should raise FileNotFoundError."""
+    with pytest.raises(FileNotFoundError):
+        di.rotate_around_axis(filename="nonexistent.h5m", backend=backend)
+
+
+# ============================================================================
+# Tests for move
+# ============================================================================
+
+
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+def test_move_x(cube_geometry, tmp_path, backend):
+    """Moving a cube by 100 in x shifts the bounding box center."""
+    output = str(tmp_path / "moved_x.h5m")
+    di.move(
+        filename=cube_geometry["filename"],
+        x=100.0,
+        output=output,
+        backend=backend,
+    )
+    original_bbox = di.get_bounding_box_from_h5m(cube_geometry["filename"])
+    moved_bbox = di.get_bounding_box_from_h5m(output)
+    assert moved_bbox.center[0] == pytest.approx(original_bbox.center[0] + 100.0, rel=1e-6)
+    assert moved_bbox.center[1] == pytest.approx(original_bbox.center[1], rel=1e-6)
+    assert moved_bbox.center[2] == pytest.approx(original_bbox.center[2], rel=1e-6)
+
+
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+def test_move_y(cube_geometry, tmp_path, backend):
+    """Moving a cube by 50 in y shifts the bounding box center."""
+    output = str(tmp_path / "moved_y.h5m")
+    di.move(
+        filename=cube_geometry["filename"],
+        y=50.0,
+        output=output,
+        backend=backend,
+    )
+    original_bbox = di.get_bounding_box_from_h5m(cube_geometry["filename"])
+    moved_bbox = di.get_bounding_box_from_h5m(output)
+    assert moved_bbox.center[0] == pytest.approx(original_bbox.center[0], rel=1e-6)
+    assert moved_bbox.center[1] == pytest.approx(original_bbox.center[1] + 50.0, rel=1e-6)
+    assert moved_bbox.center[2] == pytest.approx(original_bbox.center[2], rel=1e-6)
+
+
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+def test_move_z(cube_geometry, tmp_path, backend):
+    """Moving a cube by -30 in z shifts the bounding box center."""
+    output = str(tmp_path / "moved_z.h5m")
+    di.move(
+        filename=cube_geometry["filename"],
+        z=-30.0,
+        output=output,
+        backend=backend,
+    )
+    original_bbox = di.get_bounding_box_from_h5m(cube_geometry["filename"])
+    moved_bbox = di.get_bounding_box_from_h5m(output)
+    assert moved_bbox.center[0] == pytest.approx(original_bbox.center[0], rel=1e-6)
+    assert moved_bbox.center[1] == pytest.approx(original_bbox.center[1], rel=1e-6)
+    assert moved_bbox.center[2] == pytest.approx(original_bbox.center[2] - 30.0, rel=1e-6)
+
+
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+def test_move_xyz(cube_geometry, tmp_path, backend):
+    """Moving a cube in all directions simultaneously."""
+    output = str(tmp_path / "moved_xyz.h5m")
+    di.move(
+        filename=cube_geometry["filename"],
+        x=10.0,
+        y=20.0,
+        z=30.0,
+        output=output,
+        backend=backend,
+    )
+    original_bbox = di.get_bounding_box_from_h5m(cube_geometry["filename"])
+    moved_bbox = di.get_bounding_box_from_h5m(output)
+    assert moved_bbox.center[0] == pytest.approx(original_bbox.center[0] + 10.0, rel=1e-6)
+    assert moved_bbox.center[1] == pytest.approx(original_bbox.center[1] + 20.0, rel=1e-6)
+    assert moved_bbox.center[2] == pytest.approx(original_bbox.center[2] + 30.0, rel=1e-6)
+
+
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+def test_move_zero(cube_geometry, tmp_path, backend):
+    """Moving by (0, 0, 0) should leave the bounding box unchanged."""
+    output = str(tmp_path / "moved_zero.h5m")
+    di.move(
+        filename=cube_geometry["filename"],
+        x=0.0,
+        y=0.0,
+        z=0.0,
+        output=output,
+        backend=backend,
+    )
+    original_bbox = di.get_bounding_box_from_h5m(cube_geometry["filename"])
+    moved_bbox = di.get_bounding_box_from_h5m(output)
+    for i in range(3):
+        assert moved_bbox.lower_left[i] == pytest.approx(original_bbox.lower_left[i], rel=1e-6)
+        assert moved_bbox.upper_right[i] == pytest.approx(original_bbox.upper_right[i], rel=1e-6)
+
+
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+def test_move_materials_preserved(cube_geometry, tmp_path, backend):
+    """Materials should be unchanged after moving."""
+    output = str(tmp_path / "moved_mats.h5m")
+    di.move(
+        filename=cube_geometry["filename"],
+        x=10.0,
+        output=output,
+        backend=backend,
+    )
+    original_mats = di.get_materials_from_h5m(cube_geometry["filename"])
+    moved_mats = di.get_materials_from_h5m(output)
+    assert original_mats == moved_mats
+
+
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+def test_move_file_not_found(backend):
+    """A missing file should raise FileNotFoundError."""
+    with pytest.raises(FileNotFoundError):
+        di.move(filename="nonexistent.h5m", backend=backend)
