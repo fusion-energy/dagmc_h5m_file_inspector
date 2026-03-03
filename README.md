@@ -11,7 +11,7 @@
 # dagmc-h5m-file-inspector
 
 A minimal Python package that inspects DAGMC h5m files to extract volume IDs,
-material tags, bounding boxes, and geometric volumes.
+material tags, bounding boxes, geometric volumes, and surface areas.
 
 
 # Installation
@@ -158,6 +158,31 @@ import dagmc_h5m_file_inspector as di
 di.get_volumes_from_h5m_by_cell_id_and_material_name("dagmc.h5m")
 
 >>> {(1, 'small_box'): 1000.0, (2, 'big_box'): 8000.0}
+```
+
+## Getting surface areas by cell ID
+
+Returns a list of surface areas, one per DAGMC surface bounding the volume.
+
+```python
+import dagmc_h5m_file_inspector as di
+
+di.get_surface_area_by_cell_id("dagmc.h5m", cell_id=1)
+
+>>> [100.0, 100.0, 100.0, 100.0, 100.0, 100.0]
+```
+
+## Getting surface areas by material name
+
+Returns a list of surface areas for all DAGMC surfaces bounding volumes
+with the given material.
+
+```python
+import dagmc_h5m_file_inspector as di
+
+di.get_surface_area_by_material_name("dagmc.h5m", material="small_box")
+
+>>> [100.0, 100.0, 100.0, 100.0, 100.0, 100.0]
 ```
 
 ## Setting OpenMC material volumes from DAGMC geometry

@@ -1,6 +1,7 @@
 import cadquery as cq
 import numpy as np
 import pytest
+
 from cad_to_dagmc import CadToDagmc
 
 
@@ -101,3 +102,122 @@ def separated_boxes(tmp_path_factory):
     """Fixture providing the separated boxes geometry."""
     tmp_path = tmp_path_factory.mktemp("separated")
     return create_separated_boxes(tmp_path)
+
+
+def create_cube_geometry(tmp_path):
+    """Create a 10x10x10 cube with material 'cube'."""
+    cube = cq.Workplane().box(10, 10, 10)
+
+    filename = str(tmp_path / "cube.h5m")
+    my_model = CadToDagmc()
+    my_model.add_cadquery_object(cadquery_object=cube, material_tags=["cube"])
+    my_model.export_dagmc_h5m_file(
+        min_mesh_size=0.5, max_mesh_size=1.0e6, filename=filename
+    )
+
+    return {
+        "filename": filename,
+        "cell_id": 1,
+        "material": "cube",
+        "expected_num_surfaces": 6,
+        "expected_surface_area_each": 100.0,
+        "expected_total_surface_area": 600.0,
+    }
+
+
+def create_sphere_geometry(tmp_path):
+    """Create a sphere with radius 5 and material 'sphere'."""
+    sphere = cq.Workplane().sphere(5)
+
+    filename = str(tmp_path / "sphere.h5m")
+    my_model = CadToDagmc()
+    my_model.add_cadquery_object(cadquery_object=sphere, material_tags=["sphere"])
+    my_model.export_dagmc_h5m_file(
+        min_mesh_size=0.5, max_mesh_size=1.0e6, filename=filename
+    )
+
+    return {
+        "filename": filename,
+        "cell_id": 1,
+        "material": "sphere",
+        "expected_total_surface_area": 4 * np.pi * 25,  # 4*pi*r^2
+    }
+
+
+def create_rectangle_geometry(tmp_path):
+    """Create a 10x20x30 cuboid with material 'rectangle'."""
+    cuboid = cq.Workplane().box(10, 20, 30)
+
+    filename = str(tmp_path / "rectangle.h5m")
+    my_model = CadToDagmc()
+    my_model.add_cadquery_object(cadquery_object=cuboid, material_tags=["rectangle"])
+    my_model.export_dagmc_h5m_file(
+        min_mesh_size=0.5, max_mesh_size=1.0e6, filename=filename
+    )
+
+    return {
+        "filename": filename,
+        "cell_id": 1,
+        "material": "rectangle",
+        "expected_num_surfaces": 6,
+        "expected_sorted_areas": [200.0, 200.0, 300.0, 300.0, 600.0, 600.0],
+        "expected_total_surface_area": 2200.0,
+    }
+
+
+def create_cylinder_geometry(tmp_path):
+    """Create a cylinder with height 20, radius 5 and material 'cylinder'.
+
+    3 surfaces: top cap, bottom cap (flat), and lateral (curved).
+    - Each cap area: pi * r^2 = 25*pi ≈ 78.54
+    - Lateral area: 2*pi*r * h = 200*pi ≈ 628.32
+    - Total: 2*pi*r*(r + h) = 250*pi ≈ 785.40
+    """
+    cyl = cq.Workplane().cylinder(20, 5)
+
+    filename = str(tmp_path / "cylinder.h5m")
+    my_model = CadToDagmc()
+    my_model.add_cadquery_object(cadquery_object=cyl, material_tags=["cylinder"])
+    my_model.export_dagmc_h5m_file(
+        min_mesh_size=0.5, max_mesh_size=1.0e6, filename=filename
+    )
+
+    r = 5
+    h = 20
+    return {
+        "filename": filename,
+        "cell_id": 1,
+        "material": "cylinder",
+        "expected_num_surfaces": 3,
+        "expected_cap_area": np.pi * r**2,  # ≈ 78.54
+        "expected_lateral_area": 2 * np.pi * r * h,  # ≈ 628.32
+        "expected_total_surface_area": 2 * np.pi * r * (r + h),  # ≈ 785.40
+    }
+
+
+@pytest.fixture(scope="session")
+def cylinder_geometry(tmp_path_factory):
+    """Fixture providing the cylinder geometry."""
+    tmp_path = tmp_path_factory.mktemp("cylinder")
+    return create_cylinder_geometry(tmp_path)
+
+
+@pytest.fixture(scope="session")
+def cube_geometry(tmp_path_factory):
+    """Fixture providing the cube geometry."""
+    tmp_path = tmp_path_factory.mktemp("cube")
+    return create_cube_geometry(tmp_path)
+
+
+@pytest.fixture(scope="session")
+def sphere_geometry(tmp_path_factory):
+    """Fixture providing the sphere geometry."""
+    tmp_path = tmp_path_factory.mktemp("sphere")
+    return create_sphere_geometry(tmp_path)
+
+
+@pytest.fixture(scope="session")
+def rectangle_geometry(tmp_path_factory):
+    """Fixture providing the rectangle geometry."""
+    tmp_path = tmp_path_factory.mktemp("rectangle")
+    return create_rectangle_geometry(tmp_path)

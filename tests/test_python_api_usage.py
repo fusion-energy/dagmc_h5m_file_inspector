@@ -1432,3 +1432,181 @@ def test_convert_h5m_to_vtkhdf_all_geometries(filename, tmp_path):
         assert root["NumberOfCells"][0] == expected_n_tris
         assert root["CellData/cell_id"].shape == (expected_n_tris,)
         assert root["CellData/material_id"].shape == (expected_n_tris,)
+
+
+# ============================================================================
+# Tests for surface area functions
+# ============================================================================
+
+
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+def test_surface_area_by_cell_id_cube(cube_geometry, backend):
+    """Test surface areas of a 10x10x10 cube by cell ID.
+
+    Planar faces are exact after triangulation, so we use a tight tolerance.
+    """
+    areas = di.get_surface_area_by_cell_id(
+        filename=cube_geometry["filename"],
+        cell_id=cube_geometry["cell_id"],
+        backend=backend,
+    )
+    assert len(areas) == cube_geometry["expected_num_surfaces"]
+    for area in sorted(areas):
+        assert area == pytest.approx(
+            cube_geometry["expected_surface_area_each"], rel=1e-10
+        )
+    assert sum(areas) == pytest.approx(
+        cube_geometry["expected_total_surface_area"], rel=1e-10
+    )
+
+
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+def test_surface_area_by_cell_id_sphere(sphere_geometry, backend):
+    """Test surface area of a sphere with radius 5 by cell ID.
+
+    Curved surfaces lose area to mesh discretization (~2%), so 5% tolerance.
+    """
+    areas = di.get_surface_area_by_cell_id(
+        filename=sphere_geometry["filename"],
+        cell_id=sphere_geometry["cell_id"],
+        backend=backend,
+    )
+    assert len(areas) >= 1
+    assert sum(areas) == pytest.approx(
+        sphere_geometry["expected_total_surface_area"], rel=0.05
+    )
+
+
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+def test_surface_area_by_cell_id_cylinder(cylinder_geometry, backend):
+    """Test surface areas of a cylinder (h=20, r=5) by cell ID.
+
+    3 surfaces: two caps and one lateral. The lateral surface is curved, and
+    the caps are planar but have circular boundaries that lose area to chord
+    discretization (~4%), so all surfaces use 5% tolerance.
+    """
+    areas = di.get_surface_area_by_cell_id(
+        filename=cylinder_geometry["filename"],
+        cell_id=cylinder_geometry["cell_id"],
+        backend=backend,
+    )
+    assert len(areas) == cylinder_geometry["expected_num_surfaces"]
+    sorted_areas = sorted(areas)
+    # Two smallest are the caps (pi*r^2 each)
+    for cap_area in sorted_areas[:2]:
+        assert cap_area == pytest.approx(
+            cylinder_geometry["expected_cap_area"], rel=0.05
+        )
+    # Largest is the curved lateral surface
+    assert sorted_areas[2] == pytest.approx(
+        cylinder_geometry["expected_lateral_area"], rel=0.05
+    )
+    assert sum(areas) == pytest.approx(
+        cylinder_geometry["expected_total_surface_area"], rel=0.05
+    )
+
+
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+def test_surface_area_by_cell_id_rectangle(rectangle_geometry, backend):
+    """Test surface areas of a 10x20x30 cuboid by cell ID.
+
+    Planar faces are exact after triangulation, so we use a tight tolerance.
+    """
+    areas = di.get_surface_area_by_cell_id(
+        filename=rectangle_geometry["filename"],
+        cell_id=rectangle_geometry["cell_id"],
+        backend=backend,
+    )
+    assert len(areas) == rectangle_geometry["expected_num_surfaces"]
+    sorted_areas = sorted(areas)
+    expected_sorted = rectangle_geometry["expected_sorted_areas"]
+    for actual, expected in zip(sorted_areas, expected_sorted):
+        assert actual == pytest.approx(expected, rel=1e-10)
+    assert sum(areas) == pytest.approx(
+        rectangle_geometry["expected_total_surface_area"], rel=1e-10
+    )
+
+
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+def test_surface_area_by_material_name_cube(cube_geometry, backend):
+    """Test surface areas of a 10x10x10 cube by material name.
+
+    Planar faces are exact after triangulation, so we use a tight tolerance.
+    """
+    areas = di.get_surface_area_by_material_name(
+        filename=cube_geometry["filename"],
+        material=cube_geometry["material"],
+        backend=backend,
+    )
+    assert len(areas) == cube_geometry["expected_num_surfaces"]
+    for area in sorted(areas):
+        assert area == pytest.approx(
+            cube_geometry["expected_surface_area_each"], rel=1e-10
+        )
+    assert sum(areas) == pytest.approx(
+        cube_geometry["expected_total_surface_area"], rel=1e-10
+    )
+
+
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+def test_surface_area_by_material_name_sphere(sphere_geometry, backend):
+    """Test surface area of a sphere with radius 5 by material name.
+
+    Curved surfaces lose area to mesh discretization (~2%), so 5% tolerance.
+    """
+    areas = di.get_surface_area_by_material_name(
+        filename=sphere_geometry["filename"],
+        material=sphere_geometry["material"],
+        backend=backend,
+    )
+    assert len(areas) >= 1
+    assert sum(areas) == pytest.approx(
+        sphere_geometry["expected_total_surface_area"], rel=0.05
+    )
+
+
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+def test_surface_area_by_material_name_cylinder(cylinder_geometry, backend):
+    """Test surface areas of a cylinder (h=20, r=5) by material name.
+
+    3 surfaces: two caps and one lateral. All have curved boundaries, so
+    all use 5% tolerance.
+    """
+    areas = di.get_surface_area_by_material_name(
+        filename=cylinder_geometry["filename"],
+        material=cylinder_geometry["material"],
+        backend=backend,
+    )
+    assert len(areas) == cylinder_geometry["expected_num_surfaces"]
+    sorted_areas = sorted(areas)
+    for cap_area in sorted_areas[:2]:
+        assert cap_area == pytest.approx(
+            cylinder_geometry["expected_cap_area"], rel=0.05
+        )
+    assert sorted_areas[2] == pytest.approx(
+        cylinder_geometry["expected_lateral_area"], rel=0.05
+    )
+    assert sum(areas) == pytest.approx(
+        cylinder_geometry["expected_total_surface_area"], rel=0.05
+    )
+
+
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+def test_surface_area_by_material_name_rectangle(rectangle_geometry, backend):
+    """Test surface areas of a 10x20x30 cuboid by material name.
+
+    Planar faces are exact after triangulation, so we use a tight tolerance.
+    """
+    areas = di.get_surface_area_by_material_name(
+        filename=rectangle_geometry["filename"],
+        material=rectangle_geometry["material"],
+        backend=backend,
+    )
+    assert len(areas) == rectangle_geometry["expected_num_surfaces"]
+    sorted_areas = sorted(areas)
+    expected_sorted = rectangle_geometry["expected_sorted_areas"]
+    for actual, expected in zip(sorted_areas, expected_sorted):
+        assert actual == pytest.approx(expected, rel=1e-10)
+    assert sum(areas) == pytest.approx(
+        rectangle_geometry["expected_total_surface_area"], rel=1e-10
+    )
