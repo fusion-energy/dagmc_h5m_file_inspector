@@ -2266,23 +2266,29 @@ def _rotation_matrix(axis: str, degrees: float) -> np.ndarray:
     rad = np.radians(degrees)
     c, s = np.cos(rad), np.sin(rad)
     if axis == "x":
-        return np.array([
-            [1, 0, 0],
-            [0, c, -s],
-            [0, s, c],
-        ])
+        return np.array(
+            [
+                [1, 0, 0],
+                [0, c, -s],
+                [0, s, c],
+            ]
+        )
     elif axis == "y":
-        return np.array([
-            [c, 0, s],
-            [0, 1, 0],
-            [-s, 0, c],
-        ])
+        return np.array(
+            [
+                [c, 0, s],
+                [0, 1, 0],
+                [-s, 0, c],
+            ]
+        )
     else:  # z
-        return np.array([
-            [c, -s, 0],
-            [s, c, 0],
-            [0, 0, 1],
-        ])
+        return np.array(
+            [
+                [c, -s, 0],
+                [s, c, 0],
+                [0, 0, 1],
+            ]
+        )
 
 
 def rotate_around_axis(
@@ -2318,9 +2324,7 @@ def rotate_around_axis(
     if not Path(filename).is_file():
         raise FileNotFoundError(f"filename provided ({filename}) does not exist")
     if axis not in ("x", "y", "z"):
-        raise ValueError(
-            f"Invalid axis {axis!r}. Must be one of 'x', 'y', or 'z'."
-        )
+        raise ValueError(f"Invalid axis {axis!r}. Must be one of 'x', 'y', or 'z'.")
 
     if backend == "pymoab":
         _check_pymoab_available()

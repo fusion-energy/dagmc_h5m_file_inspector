@@ -1742,7 +1742,9 @@ def test_move_x(cube_geometry, tmp_path, backend):
     )
     original_bbox = di.get_bounding_box_from_h5m(cube_geometry["filename"])
     moved_bbox = di.get_bounding_box_from_h5m(output)
-    assert moved_bbox.center[0] == pytest.approx(original_bbox.center[0] + 100.0, rel=1e-6)
+    assert moved_bbox.center[0] == pytest.approx(
+        original_bbox.center[0] + 100.0, rel=1e-6
+    )
     assert moved_bbox.center[1] == pytest.approx(original_bbox.center[1], rel=1e-6)
     assert moved_bbox.center[2] == pytest.approx(original_bbox.center[2], rel=1e-6)
 
@@ -1760,7 +1762,9 @@ def test_move_y(cube_geometry, tmp_path, backend):
     original_bbox = di.get_bounding_box_from_h5m(cube_geometry["filename"])
     moved_bbox = di.get_bounding_box_from_h5m(output)
     assert moved_bbox.center[0] == pytest.approx(original_bbox.center[0], rel=1e-6)
-    assert moved_bbox.center[1] == pytest.approx(original_bbox.center[1] + 50.0, rel=1e-6)
+    assert moved_bbox.center[1] == pytest.approx(
+        original_bbox.center[1] + 50.0, rel=1e-6
+    )
     assert moved_bbox.center[2] == pytest.approx(original_bbox.center[2], rel=1e-6)
 
 
@@ -1778,7 +1782,9 @@ def test_move_z(cube_geometry, tmp_path, backend):
     moved_bbox = di.get_bounding_box_from_h5m(output)
     assert moved_bbox.center[0] == pytest.approx(original_bbox.center[0], rel=1e-6)
     assert moved_bbox.center[1] == pytest.approx(original_bbox.center[1], rel=1e-6)
-    assert moved_bbox.center[2] == pytest.approx(original_bbox.center[2] - 30.0, rel=1e-6)
+    assert moved_bbox.center[2] == pytest.approx(
+        original_bbox.center[2] - 30.0, rel=1e-6
+    )
 
 
 @pytest.mark.parametrize("backend", ["h5py", "pymoab"])
@@ -1795,9 +1801,15 @@ def test_move_xyz(cube_geometry, tmp_path, backend):
     )
     original_bbox = di.get_bounding_box_from_h5m(cube_geometry["filename"])
     moved_bbox = di.get_bounding_box_from_h5m(output)
-    assert moved_bbox.center[0] == pytest.approx(original_bbox.center[0] + 10.0, rel=1e-6)
-    assert moved_bbox.center[1] == pytest.approx(original_bbox.center[1] + 20.0, rel=1e-6)
-    assert moved_bbox.center[2] == pytest.approx(original_bbox.center[2] + 30.0, rel=1e-6)
+    assert moved_bbox.center[0] == pytest.approx(
+        original_bbox.center[0] + 10.0, rel=1e-6
+    )
+    assert moved_bbox.center[1] == pytest.approx(
+        original_bbox.center[1] + 20.0, rel=1e-6
+    )
+    assert moved_bbox.center[2] == pytest.approx(
+        original_bbox.center[2] + 30.0, rel=1e-6
+    )
 
 
 @pytest.mark.parametrize("backend", ["h5py", "pymoab"])
@@ -1815,8 +1827,12 @@ def test_move_zero(cube_geometry, tmp_path, backend):
     original_bbox = di.get_bounding_box_from_h5m(cube_geometry["filename"])
     moved_bbox = di.get_bounding_box_from_h5m(output)
     for i in range(3):
-        assert moved_bbox.lower_left[i] == pytest.approx(original_bbox.lower_left[i], rel=1e-6)
-        assert moved_bbox.upper_right[i] == pytest.approx(original_bbox.upper_right[i], rel=1e-6)
+        assert moved_bbox.lower_left[i] == pytest.approx(
+            original_bbox.lower_left[i], rel=1e-6
+        )
+        assert moved_bbox.upper_right[i] == pytest.approx(
+            original_bbox.upper_right[i], rel=1e-6
+        )
 
 
 @pytest.mark.parametrize("backend", ["h5py", "pymoab"])
