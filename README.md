@@ -185,6 +185,23 @@ di.get_surface_area_by_material_name("dagmc.h5m", material="small_box")
 >>> [100.0, 100.0, 100.0, 100.0, 100.0, 100.0]
 ```
 
+## Getting surface shared status
+
+Returns a dictionary mapping each surface ID to the cell IDs and materials
+that share it. Useful for identifying interfaces between volumes.
+
+```python
+import dagmc_h5m_file_inspector as di
+
+di.get_surface_shared_status("dagmc.h5m")
+
+>>> {1: {'materials': ['small_box'], 'cell_ids': [1]},
+     2: {'materials': ['small_box'], 'cell_ids': [1]},
+     ...
+     7: {'materials': ['small_box', 'big_box'], 'cell_ids': [1, 2]},
+     ...}
+```
+
 ## Setting OpenMC material volumes from DAGMC geometry
 
 This function reads the DAGMC file, matches materials by name, and sets the
