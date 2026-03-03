@@ -1725,6 +1725,90 @@ def test_rotate_around_axis_file_not_found(backend):
         di.rotate_around_axis(filename="nonexistent.h5m", backend=backend)
 
 
+@requires_openmc
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+def test_rotate_around_axis_openmc_transport(touching_boxes, backend, tmp_path):
+    """Verify that a rotated h5m file is a valid DAGMC geometry by running
+    OpenMC fixed-source particle transport through it.
+    """
+    import openmc
+
+    output = str(tmp_path / f"rotated_transport_{backend}.h5m")
+    di.rotate_around_axis(
+        filename=touching_boxes["filename"],
+        axis="z",
+        degrees=90,
+        output=output,
+        backend=backend,
+    )
+
+    # Set up cross sections (H1 only)
+    xs_path = os.path.join(os.path.dirname(__file__), "ENDFB-7.1-NNDC_H1.h5")
+    xs_xml = str(tmp_path / "cross_sections.xml")
+    with open(xs_xml, "w") as fh:
+        fh.write(
+            '<?xml version="1.0" encoding="UTF-8"?>\n'
+            "<cross_sections>\n"
+            f'  <library materials="H1" path="{xs_path}" type="neutron"/>\n'
+            "</cross_sections>\n"
+        )
+    openmc.config["cross_sections"] = xs_xml
+
+    # Create materials matching the DAGMC file
+    vol_mat = di.get_volumes_and_materials_from_h5m(output)
+    mat_names = sorted(set(vol_mat.values()))
+    openmc_mats = []
+    for name in mat_names:
+        mat = openmc.Material(name=name)
+        mat.add_nuclide("H1", 1.0, "ao")
+        mat.set_density("g/cm3", 0.001)
+        openmc_mats.append(mat)
+    materials = openmc.Materials(openmc_mats)
+
+    # DAGMC geometry
+    dag_univ = openmc.DAGMCUniverse(filename=output)
+    bound_dag_univ = dag_univ.bounded_universe()
+    geometry = openmc.Geometry(root=bound_dag_univ)
+
+    # Point source near center of geometry
+    bb = di.get_bounding_box_from_h5m(output)
+    center = bb.center
+    source = openmc.IndependentSource()
+    source.space = openmc.stats.Point(
+        (center[0] + 0.1, center[1] + 0.1, center[2] + 0.1)
+    )
+    source.angle = openmc.stats.Isotropic()
+    source.energy = openmc.stats.Discrete([14e6], [1])
+
+    settings = openmc.Settings()
+    settings.batches = 2
+    settings.particles = 1000
+    settings.inactive = 0
+    settings.run_mode = "fixed source"
+    settings.source = source
+
+    tally = openmc.Tally(name="flux")
+    tally.scores = ["flux"]
+
+    model = openmc.Model(
+        materials=materials,
+        geometry=geometry,
+        settings=settings,
+        tallies=openmc.Tallies([tally]),
+    )
+
+    original_dir = os.getcwd()
+    os.chdir(tmp_path)
+    try:
+        output_file = model.run(output=False)
+        sp = openmc.StatePoint(output_file)
+        flux = sp.get_tally(name="flux").mean.flatten()[0]
+        # Flux should be positive (particles traversed the geometry)
+        assert flux > 0
+    finally:
+        os.chdir(original_dir)
+
+
 # ============================================================================
 # Tests for move
 # ============================================================================
@@ -1855,3 +1939,88 @@ def test_move_file_not_found(backend):
     """A missing file should raise FileNotFoundError."""
     with pytest.raises(FileNotFoundError):
         di.move(filename="nonexistent.h5m", backend=backend)
+
+
+@requires_openmc
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+def test_move_openmc_transport(touching_boxes, backend, tmp_path):
+    """Verify that a moved h5m file is a valid DAGMC geometry by running
+    OpenMC fixed-source particle transport through it.
+    """
+    import openmc
+
+    output = str(tmp_path / f"moved_transport_{backend}.h5m")
+    di.move(
+        filename=touching_boxes["filename"],
+        x=100.0,
+        y=50.0,
+        z=-25.0,
+        output=output,
+        backend=backend,
+    )
+
+    # Set up cross sections (H1 only)
+    xs_path = os.path.join(os.path.dirname(__file__), "ENDFB-7.1-NNDC_H1.h5")
+    xs_xml = str(tmp_path / "cross_sections.xml")
+    with open(xs_xml, "w") as fh:
+        fh.write(
+            '<?xml version="1.0" encoding="UTF-8"?>\n'
+            "<cross_sections>\n"
+            f'  <library materials="H1" path="{xs_path}" type="neutron"/>\n'
+            "</cross_sections>\n"
+        )
+    openmc.config["cross_sections"] = xs_xml
+
+    # Create materials matching the DAGMC file
+    vol_mat = di.get_volumes_and_materials_from_h5m(output)
+    mat_names = sorted(set(vol_mat.values()))
+    openmc_mats = []
+    for name in mat_names:
+        mat = openmc.Material(name=name)
+        mat.add_nuclide("H1", 1.0, "ao")
+        mat.set_density("g/cm3", 0.001)
+        openmc_mats.append(mat)
+    materials = openmc.Materials(openmc_mats)
+
+    # DAGMC geometry
+    dag_univ = openmc.DAGMCUniverse(filename=output)
+    bound_dag_univ = dag_univ.bounded_universe()
+    geometry = openmc.Geometry(root=bound_dag_univ)
+
+    # Point source near center of geometry
+    bb = di.get_bounding_box_from_h5m(output)
+    center = bb.center
+    source = openmc.IndependentSource()
+    source.space = openmc.stats.Point(
+        (center[0] + 0.1, center[1] + 0.1, center[2] + 0.1)
+    )
+    source.angle = openmc.stats.Isotropic()
+    source.energy = openmc.stats.Discrete([14e6], [1])
+
+    settings = openmc.Settings()
+    settings.batches = 2
+    settings.particles = 1000
+    settings.inactive = 0
+    settings.run_mode = "fixed source"
+    settings.source = source
+
+    tally = openmc.Tally(name="flux")
+    tally.scores = ["flux"]
+
+    model = openmc.Model(
+        materials=materials,
+        geometry=geometry,
+        settings=settings,
+        tallies=openmc.Tallies([tally]),
+    )
+
+    original_dir = os.getcwd()
+    os.chdir(tmp_path)
+    try:
+        output_file = model.run(output=False)
+        sp = openmc.StatePoint(output_file)
+        flux = sp.get_tally(name="flux").mean.flatten()[0]
+        # Flux should be positive (particles traversed the geometry)
+        assert flux > 0
+    finally:
+        os.chdir(original_dir)
