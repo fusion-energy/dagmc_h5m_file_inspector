@@ -290,6 +290,37 @@ di.get_materials_from_h5m("reactor_reduced.h5m")
 >>> ['first_wall']
 ```
 
+## Rotating a DAGMC geometry around an axis
+
+Rotate the mesh coordinates around a coordinate axis and write a new h5m file.
+
+```python
+import dagmc_h5m_file_inspector as di
+
+di.rotate_around_axis(
+    filename="dagmc.h5m",
+    axis="z",
+    degrees=90,
+    output="dagmc_rotated.h5m",
+)
+```
+
+## Moving a DAGMC geometry
+
+Translate (move) the mesh coordinates by an offset and write a new h5m file.
+
+```python
+import dagmc_h5m_file_inspector as di
+
+di.move(
+    filename="dagmc.h5m",
+    x=10.0,
+    y=0.0,
+    z=0.0,
+    output="dagmc_moved.h5m",
+)
+```
+
 ## Using the pymoab backend
 
 All functions support an optional `backend` parameter. The default is `"h5py"`,

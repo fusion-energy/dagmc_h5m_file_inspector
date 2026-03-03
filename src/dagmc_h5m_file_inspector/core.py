@@ -2251,3 +2251,148 @@ def remove_materials_from_h5m(
             input_filename, output_filename, materials_to_remove
         )
     return _remove_materials_h5py(input_filename, output_filename, materials_to_remove)
+
+
+def _rotation_matrix(axis: str, degrees: float) -> np.ndarray:
+    """Return a 3x3 rotation matrix for the given axis and angle.
+
+    Arguments:
+        axis: rotation axis, one of "x", "y", or "z"
+        degrees: rotation angle in degrees
+
+    Returns:
+        A 3x3 numpy rotation matrix.
+    """
+    rad = np.radians(degrees)
+    c, s = np.cos(rad), np.sin(rad)
+    if axis == "x":
+        return np.array(
+            [
+                [1, 0, 0],
+                [0, c, -s],
+                [0, s, c],
+            ]
+        )
+    elif axis == "y":
+        return np.array(
+            [
+                [c, 0, s],
+                [0, 1, 0],
+                [-s, 0, c],
+            ]
+        )
+    else:  # z
+        return np.array(
+            [
+                [c, -s, 0],
+                [s, c, 0],
+                [0, 0, 1],
+            ]
+        )
+
+
+def rotate_around_axis(
+    filename: str = "dagmc.h5m",
+    axis: Literal["x", "y", "z"] = "z",
+    degrees: float = 90,
+    output: str = "dagmc_rotated.h5m",
+    backend: Literal["h5py", "pymoab"] = "h5py",
+) -> str:
+    """Rotate a DAGMC geometry around a coordinate axis and write a new file.
+
+    Arguments:
+        filename: path to the input DAGMC h5m file
+        axis: the coordinate axis to rotate around ("x", "y", or "z")
+        degrees: rotation angle in degrees
+        output: path for the output h5m file
+        backend: the backend to use for reading the file ("h5py" or "pymoab")
+
+    Returns:
+        The output filename.
+
+    Raises:
+        FileNotFoundError: If *filename* does not exist.
+        ValueError: If *axis* is not "x", "y", or "z", or if *backend* is
+            not recognised.
+
+    Example:
+        >>> import dagmc_h5m_file_inspector as di
+        >>> di.rotate_around_axis("dagmc.h5m", axis="z", degrees=90)
+        'dagmc_rotated.h5m'
+    """
+    _validate_backend(backend)
+    if not Path(filename).is_file():
+        raise FileNotFoundError(f"filename provided ({filename}) does not exist")
+    if axis not in ("x", "y", "z"):
+        raise ValueError(f"Invalid axis {axis!r}. Must be one of 'x', 'y', or 'z'.")
+
+    if backend == "pymoab":
+        _check_pymoab_available()
+
+    vol_mat = get_volumes_and_materials_from_h5m(
+        filename=filename, remove_prefix=True, backend=backend
+    )
+    vol_data = get_triangle_conn_and_coords_by_volume(
+        filename=filename, backend=backend
+    )
+
+    R = _rotation_matrix(axis, degrees)
+    rotated_data = {}
+    for vid, (conn, coords) in vol_data.items():
+        rotated_data[vid] = (conn, coords @ R.T)
+
+    _write_h5m(output, rotated_data, vol_mat)
+    return output
+
+
+def move(
+    filename: str = "dagmc.h5m",
+    x: float = 0.0,
+    y: float = 0.0,
+    z: float = 0.0,
+    output: str = "dagmc_moved.h5m",
+    backend: Literal["h5py", "pymoab"] = "h5py",
+) -> str:
+    """Translate a DAGMC geometry by a given offset and write a new file.
+
+    Arguments:
+        filename: path to the input DAGMC h5m file
+        x: translation offset in the x direction
+        y: translation offset in the y direction
+        z: translation offset in the z direction
+        output: path for the output h5m file
+        backend: the backend to use for reading the file ("h5py" or "pymoab")
+
+    Returns:
+        The output filename.
+
+    Raises:
+        FileNotFoundError: If *filename* does not exist.
+        ValueError: If *backend* is not recognised.
+
+    Example:
+        >>> import dagmc_h5m_file_inspector as di
+        >>> di.move("dagmc.h5m", x=10.0, y=0.0, z=0.0)
+        'dagmc_moved.h5m'
+    """
+    _validate_backend(backend)
+    if not Path(filename).is_file():
+        raise FileNotFoundError(f"filename provided ({filename}) does not exist")
+
+    if backend == "pymoab":
+        _check_pymoab_available()
+
+    vol_mat = get_volumes_and_materials_from_h5m(
+        filename=filename, remove_prefix=True, backend=backend
+    )
+    vol_data = get_triangle_conn_and_coords_by_volume(
+        filename=filename, backend=backend
+    )
+
+    offset = np.array([x, y, z])
+    moved_data = {}
+    for vid, (conn, coords) in vol_data.items():
+        moved_data[vid] = (conn, coords + offset)
+
+    _write_h5m(output, moved_data, vol_mat)
+    return output
