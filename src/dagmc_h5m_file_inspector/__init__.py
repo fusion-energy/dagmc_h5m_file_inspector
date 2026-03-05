@@ -1,3 +1,7 @@
+from importlib.metadata import version
+
+__version__ = version("dagmc_h5m_file_inspector")
+
 from .core import (
     BoundingBox,
     convert_h5m_to_vtkhdf,

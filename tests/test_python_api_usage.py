@@ -6,6 +6,12 @@ import pytest
 
 import dagmc_h5m_file_inspector as di
 
+
+def test_version():
+    assert isinstance(di.__version__, str)
+    assert len(di.__version__) > 0
+
+
 # Check if openmc is available
 try:
     import openmc  # noqa: F401
