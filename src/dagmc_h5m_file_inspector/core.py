@@ -716,6 +716,69 @@ def _get_surface_areas_h5py(filename: str) -> Dict[int, List[float]]:
         return result
 
 
+def _get_surface_shared_status_h5py(
+    filename: str,
+) -> Dict[int, Dict[str, list]]:
+    """Get surface sharing status using h5py backend.
+
+    Returns a dictionary mapping each surface global ID to the cell IDs and
+    materials that bound it. Uses GEOM_SENSE_2 to determine which volumes
+    share each surface.
+    """
+    vol_mat = _get_volumes_and_materials_h5py(filename, remove_prefix=True)
+
+    with h5py.File(filename, "r") as f:
+        categories = _read_tag_h5py(f, "CATEGORY")
+        geom_dim = _read_tag_h5py(f, "GEOM_DIMENSION")
+        geom_sense = _read_geom_sense_h5py(f)
+
+        global_ids: Dict[int, int] = {}
+        sets_start_id = int(f["tstt/sets/list"].attrs["start_id"])
+        if "tstt/sets/tags/GLOBAL_ID" in f:
+            dense_gids = f["tstt/sets/tags/GLOBAL_ID"][...]
+            for idx, gid in enumerate(dense_gids):
+                handle = sets_start_id + idx
+                global_ids[handle] = int(gid)
+        else:
+            global_ids = _read_tag_h5py(f, "GLOBAL_ID")
+
+        surface_handles = {h for h, cat in categories.items() if cat == "Surface"}
+        surface_handles.update(h for h, dim in geom_dim.items() if dim == 2)
+
+        volume_handles = {h for h, cat in categories.items() if cat == "Volume"}
+        volume_handles.update(h for h, dim in geom_dim.items() if dim == 3)
+
+        # Map volume handle -> (global_id, material)
+        vol_handle_to_info: Dict[int, Tuple[int, str]] = {}
+        for vol_handle in volume_handles:
+            vol_gid = global_ids.get(vol_handle)
+            if vol_gid is not None and vol_gid in vol_mat:
+                vol_handle_to_info[vol_handle] = (vol_gid, vol_mat[vol_gid])
+
+        result: Dict[int, Dict[str, list]] = {}
+        for surf_handle in surface_handles:
+            surf_gid = global_ids.get(surf_handle)
+            if surf_gid is None:
+                continue
+
+            sense = geom_sense.get(surf_handle)
+            cell_ids: List[int] = []
+            materials: List[str] = []
+
+            if sense is not None:
+                forward_handle, reverse_handle = sense
+                for vol_handle in (forward_handle, reverse_handle):
+                    if vol_handle in vol_handle_to_info:
+                        gid, mat = vol_handle_to_info[vol_handle]
+                        if gid not in cell_ids:
+                            cell_ids.append(gid)
+                            materials.append(mat)
+
+            result[surf_gid] = {"materials": materials, "cell_ids": cell_ids}
+
+        return result
+
+
 def _get_volumes_sizes_h5py(filename: str) -> Dict[int, float]:
     """Get geometric volume sizes for each volume ID using h5py backend.
 
@@ -1643,6 +1706,66 @@ def _get_surface_areas_pymoab(filename: str) -> Dict[int, List[float]]:
     return result
 
 
+def _get_surface_shared_status_pymoab(
+    filename: str,
+) -> Dict[int, Dict[str, list]]:
+    """Get surface sharing status using pymoab backend.
+
+    Returns a dictionary mapping each surface global ID to the cell IDs and
+    materials that bound it.
+    """
+    import pymoab as mb
+
+    mbcore = _load_moab_file(filename)
+    category_tag = mbcore.tag_get_handle(mb.types.CATEGORY_TAG_NAME)
+    id_tag = mbcore.tag_get_handle(mb.types.GLOBAL_ID_TAG_NAME)
+
+    try:
+        geom_sense_tag = mbcore.tag_get_handle("GEOM_SENSE_2")
+    except RuntimeError:
+        geom_sense_tag = None
+
+    vol_mat = _get_volumes_and_materials_pymoab(filename, remove_prefix=True)
+
+    volume_ents = mbcore.get_entities_by_type_and_tag(
+        0, mb.types.MBENTITYSET, category_tag, ["Volume"]
+    )
+    vol_ent_to_info: Dict[int, Tuple[int, str]] = {}
+    for vol_ent in volume_ents:
+        vol_gid = mbcore.tag_get_data(id_tag, vol_ent)[0][0].item()
+        if vol_gid in vol_mat:
+            vol_ent_to_info[int(vol_ent)] = (vol_gid, vol_mat[vol_gid])
+
+    surface_ents = mbcore.get_entities_by_type_and_tag(
+        0, mb.types.MBENTITYSET, category_tag, ["Surface"]
+    )
+
+    result: Dict[int, Dict[str, list]] = {}
+    for surf_ent in surface_ents:
+        surf_gid = mbcore.tag_get_data(id_tag, surf_ent)[0][0].item()
+
+        cell_ids: List[int] = []
+        materials: List[str] = []
+
+        if geom_sense_tag is not None:
+            try:
+                sense_data = mbcore.tag_get_data(geom_sense_tag, surf_ent)
+                forward_vol = int(sense_data[0][0])
+                reverse_vol = int(sense_data[0][1])
+                for vol_handle in (forward_vol, reverse_vol):
+                    if vol_handle in vol_ent_to_info:
+                        gid, mat = vol_ent_to_info[vol_handle]
+                        if gid not in cell_ids:
+                            cell_ids.append(gid)
+                            materials.append(mat)
+            except RuntimeError:
+                pass
+
+        result[surf_gid] = {"materials": materials, "cell_ids": cell_ids}
+
+    return result
+
+
 # ============================================================================
 # Public API
 # ============================================================================
@@ -1971,6 +2094,31 @@ def get_surface_area_by_material_name(
         combined.extend(all_areas.get(vol_id, []))
 
     return combined
+
+
+def get_surface_shared_status(
+    filename: str,
+    backend: Literal["h5py", "pymoab"] = "h5py",
+) -> Dict[int, Dict[str, list]]:
+    """Returns each surface's bounding cell IDs and materials.
+
+    Arguments:
+        filename: the filename of the DAGMC h5m file
+        backend: the backend to use for reading the file ("h5py" or "pymoab")
+
+    Returns:
+        A dictionary mapping surface global IDs to dicts containing
+        'materials' (list of str) and 'cell_ids' (list of int) that
+        bound each surface.
+    """
+    _validate_backend(backend)
+    if not Path(filename).is_file():
+        raise FileNotFoundError(f"filename provided ({filename}) does not exist")
+
+    if backend == "pymoab":
+        _check_pymoab_available()
+        return _get_surface_shared_status_pymoab(filename)
+    return _get_surface_shared_status_h5py(filename)
 
 
 def set_openmc_material_volumes_from_h5m(

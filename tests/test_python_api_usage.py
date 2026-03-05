@@ -6,6 +6,12 @@ import pytest
 
 import dagmc_h5m_file_inspector as di
 
+
+def test_version():
+    assert isinstance(di.__version__, str)
+    assert len(di.__version__) > 0
+
+
 # Check if openmc is available
 try:
     import openmc  # noqa: F401
@@ -1610,6 +1616,66 @@ def test_surface_area_by_material_name_rectangle(rectangle_geometry, backend):
     assert sum(areas) == pytest.approx(
         rectangle_geometry["expected_total_surface_area"], rel=1e-10
     )
+
+
+# ============================================================================
+# Tests for get_surface_shared_status
+# ============================================================================
+
+
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+def test_surface_shared_status_touching_boxes(touching_boxes, backend):
+    """Touching boxes should have at least one shared surface with 2 cell_ids."""
+    result = di.get_surface_shared_status(
+        filename=touching_boxes["filename"],
+        backend=backend,
+    )
+
+    # All entries should have the expected structure
+    for surf_id, info in result.items():
+        assert "materials" in info
+        assert "cell_ids" in info
+        assert len(info["materials"]) == len(info["cell_ids"])
+
+    # At least one surface should be shared (2 cell_ids)
+    shared = {k: v for k, v in result.items() if len(v["cell_ids"]) == 2}
+    assert len(shared) >= 1
+
+    # The shared surface should reference both materials
+    for info in shared.values():
+        assert set(info["materials"]) == {"small_box", "big_box"}
+        assert set(info["cell_ids"]) == {1, 2}
+
+    # Non-shared surfaces should have exactly 1 cell_id
+    for surf_id, info in result.items():
+        if surf_id not in shared:
+            assert len(info["cell_ids"]) == 1
+
+
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+def test_surface_shared_status_separated_boxes(separated_boxes, backend):
+    """Separated boxes should have no shared surfaces."""
+    result = di.get_surface_shared_status(
+        filename=separated_boxes["filename"],
+        backend=backend,
+    )
+
+    for surf_id, info in result.items():
+        assert len(info["cell_ids"]) <= 1
+
+
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+def test_surface_shared_status_cube(cube_geometry, backend):
+    """A single cube should have all surfaces with 1 cell_id."""
+    result = di.get_surface_shared_status(
+        filename=cube_geometry["filename"],
+        backend=backend,
+    )
+
+    assert len(result) == cube_geometry["expected_num_surfaces"]
+    for surf_id, info in result.items():
+        assert info["cell_ids"] == [1]
+        assert info["materials"] == ["cube"]
 
 
 # ============================================================================
