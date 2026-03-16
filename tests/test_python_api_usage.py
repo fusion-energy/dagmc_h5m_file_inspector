@@ -2090,3 +2090,185 @@ def test_move_openmc_transport(touching_boxes, backend, tmp_path):
         assert flux > 0
     finally:
         os.chdir(original_dir)
+
+
+# ============================================================================
+# Tests for combine_h5m_files
+# ============================================================================
+
+
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+def test_combine_two_separate_cubes(tmp_path, backend):
+    """Combine two separate single-cube h5m files and verify volumes, materials,
+    and bounding box of the result."""
+    import cadquery as cq
+
+    from cad_to_dagmc import CadToDagmc
+
+    # Create cube A at origin
+    cube_a = cq.Workplane().box(10, 10, 10)
+    file_a = str(tmp_path / "cube_a.h5m")
+    model_a = CadToDagmc()
+    model_a.add_cadquery_object(cadquery_object=cube_a, material_tags=["mat_a"])
+    model_a.export_dagmc_h5m_file(
+        min_mesh_size=0.5, max_mesh_size=1.0e6, filename=file_a
+    )
+
+    # Create cube B offset in x (no overlap)
+    cube_b = cq.Workplane().moveTo(30, 0).box(10, 10, 10)
+    file_b = str(tmp_path / "cube_b.h5m")
+    model_b = CadToDagmc()
+    model_b.add_cadquery_object(cadquery_object=cube_b, material_tags=["mat_b"])
+    model_b.export_dagmc_h5m_file(
+        min_mesh_size=0.5, max_mesh_size=1.0e6, filename=file_b
+    )
+
+    output = str(tmp_path / "combined.h5m")
+    di.combine_h5m_files(
+        input_files=[file_a, file_b], output_file=output, backend=backend
+    )
+
+    # Check volumes
+    volumes = di.get_volumes_from_h5m(output)
+    assert volumes == [1, 2]
+
+    # Check materials
+    materials = di.get_materials_from_h5m(output)
+    assert sorted(materials) == ["mat_a", "mat_b"]
+
+    # Check volume-material mapping
+    vol_mat = di.get_volumes_and_materials_from_h5m(output, remove_prefix=True)
+    assert vol_mat == {1: "mat_a", 2: "mat_b"}
+
+    # Combined bounding box should span both cubes
+    bbox = di.get_bounding_box_from_h5m(output)
+    np.testing.assert_allclose(bbox.lower_left, [-5.0, -5.0, -5.0], atol=0.1)
+    np.testing.assert_allclose(bbox.upper_right, [35.0, 5.0, 5.0], atol=0.1)
+
+
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+def test_combine_preserves_volumes(cube_geometry, sphere_geometry, tmp_path, backend):
+    """Combining a cube and sphere preserves the mesh volume of each."""
+    output = str(tmp_path / "combined_vol.h5m")
+    di.combine_h5m_files(
+        input_files=[cube_geometry["filename"], sphere_geometry["filename"]],
+        output_file=output,
+        backend=backend,
+    )
+
+    vol_by_id = di.get_volumes_from_h5m_by_cell_id(output)
+    # Volume 1 is the cube (1000), volume 2 is the sphere (4/3 * pi * 125)
+    assert vol_by_id[1] == pytest.approx(1000.0, rel=0.05)
+    assert vol_by_id[2] == pytest.approx(4 / 3 * np.pi * 125, rel=0.05)
+
+
+def test_combine_empty_list():
+    """Passing an empty list raises ValueError."""
+    with pytest.raises(ValueError, match="must not be empty"):
+        di.combine_h5m_files(input_files=[], output_file="out.h5m")
+
+
+def test_combine_file_not_found():
+    """Passing a non-existent file raises FileNotFoundError."""
+    with pytest.raises(FileNotFoundError):
+        di.combine_h5m_files(input_files=["does_not_exist.h5m"], output_file="out.h5m")
+
+
+@requires_openmc
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+def test_combine_openmc_transport(tmp_path, backend):
+    """Verify that a combined h5m file is a valid DAGMC geometry by running
+    OpenMC fixed-source particle transport through it."""
+    import cadquery as cq
+    import openmc
+
+    from cad_to_dagmc import CadToDagmc
+
+    # Create cube A at origin
+    cube_a = cq.Workplane().box(10, 10, 10)
+    file_a = str(tmp_path / "cube_a.h5m")
+    model_a = CadToDagmc()
+    model_a.add_cadquery_object(cadquery_object=cube_a, material_tags=["mat_a"])
+    model_a.export_dagmc_h5m_file(
+        min_mesh_size=0.5, max_mesh_size=1.0e6, filename=file_a
+    )
+
+    # Create cube B offset in x (no overlap)
+    cube_b = cq.Workplane().moveTo(30, 0).box(10, 10, 10)
+    file_b = str(tmp_path / "cube_b.h5m")
+    model_b = CadToDagmc()
+    model_b.add_cadquery_object(cadquery_object=cube_b, material_tags=["mat_b"])
+    model_b.export_dagmc_h5m_file(
+        min_mesh_size=0.5, max_mesh_size=1.0e6, filename=file_b
+    )
+
+    output = str(tmp_path / "combined_transport.h5m")
+    di.combine_h5m_files(
+        input_files=[file_a, file_b], output_file=output, backend=backend
+    )
+
+    # Set up cross sections (H1 only)
+    xs_path = os.path.join(os.path.dirname(__file__), "ENDFB-7.1-NNDC_H1.h5")
+    xs_xml = str(tmp_path / "cross_sections.xml")
+    with open(xs_xml, "w") as fh:
+        fh.write(
+            '<?xml version="1.0" encoding="UTF-8"?>\n'
+            "<cross_sections>\n"
+            f'  <library materials="H1" path="{xs_path}" type="neutron"/>\n'
+            "</cross_sections>\n"
+        )
+    openmc.config["cross_sections"] = xs_xml
+
+    # Create materials matching the DAGMC file
+    vol_mat = di.get_volumes_and_materials_from_h5m(output)
+    mat_names = sorted(set(vol_mat.values()))
+    openmc_mats = []
+    for name in mat_names:
+        mat = openmc.Material(name=name)
+        mat.add_nuclide("H1", 1.0, "ao")
+        mat.set_density("g/cm3", 0.001)
+        openmc_mats.append(mat)
+    materials = openmc.Materials(openmc_mats)
+
+    # DAGMC geometry
+    dag_univ = openmc.DAGMCUniverse(filename=output)
+    bound_dag_univ = dag_univ.bounded_universe()
+    geometry = openmc.Geometry(root=bound_dag_univ)
+
+    # Point source near center of geometry
+    bb = di.get_bounding_box_from_h5m(output)
+    center = bb.center
+    source = openmc.IndependentSource()
+    source.space = openmc.stats.Point(
+        (center[0] + 0.1, center[1] + 0.1, center[2] + 0.1)
+    )
+    source.angle = openmc.stats.Isotropic()
+    source.energy = openmc.stats.Discrete([14e6], [1])
+
+    settings = openmc.Settings()
+    settings.batches = 2
+    settings.particles = 1000
+    settings.inactive = 0
+    settings.run_mode = "fixed source"
+    settings.source = source
+
+    tally = openmc.Tally(name="flux")
+    tally.scores = ["flux"]
+
+    model = openmc.Model(
+        materials=materials,
+        geometry=geometry,
+        settings=settings,
+        tallies=openmc.Tallies([tally]),
+    )
+
+    original_dir = os.getcwd()
+    os.chdir(tmp_path)
+    try:
+        output_file = model.run(output=False)
+        sp = openmc.StatePoint(output_file)
+        flux = sp.get_tally(name="flux").mean.flatten()[0]
+        # Flux should be positive (particles traversed the geometry)
+        assert flux > 0
+    finally:
+        os.chdir(original_dir)

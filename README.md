@@ -338,6 +338,29 @@ di.move(
 )
 ```
 
+## Combining multiple DAGMC h5m files
+
+Merge multiple DAGMC h5m files into a single file. Volumes are renumbered
+sequentially in the output. It is the caller's responsibility to ensure the
+geometries do not overlap.
+
+```python
+import dagmc_h5m_file_inspector as di
+
+di.combine_h5m_files(
+    input_files=["file_a.h5m", "file_b.h5m"],
+    output_file="combined.h5m",
+)
+
+di.get_volumes_from_h5m("combined.h5m")
+
+>>> [1, 2]
+
+di.get_materials_from_h5m("combined.h5m")
+
+>>> ['mat_a', 'mat_b']
+```
+
 ## Using the pymoab backend
 
 All functions support an optional `backend` parameter. The default is `"h5py"`,

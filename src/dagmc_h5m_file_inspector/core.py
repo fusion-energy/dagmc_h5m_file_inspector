@@ -2544,3 +2544,64 @@ def move(
 
     _write_h5m(output, moved_data, vol_mat)
     return output
+
+
+def combine_h5m_files(
+    input_files: List[str],
+    output_file: str = "dagmc_combined.h5m",
+    backend: Literal["h5py", "pymoab"] = "h5py",
+) -> str:
+    """Combine multiple DAGMC h5m files into a single file.
+
+    The volumes from each input file are renumbered sequentially so that
+    volume IDs are unique in the combined output.  It is the caller's
+    responsibility to ensure the geometries do not overlap.
+
+    Arguments:
+        input_files: list of paths to DAGMC h5m files to combine
+        output_file: path for the combined output h5m file
+        backend: the backend to use for reading the files ("h5py" or "pymoab")
+
+    Returns:
+        The output filename.
+
+    Raises:
+        FileNotFoundError: If any of the input files do not exist.
+        ValueError: If *input_files* is empty or *backend* is not recognised.
+
+    Example:
+        >>> import dagmc_h5m_file_inspector as di
+        >>> di.combine_h5m_files(["file_a.h5m", "file_b.h5m"], "combined.h5m")
+        'combined.h5m'
+    """
+    _validate_backend(backend)
+
+    if not input_files:
+        raise ValueError("input_files must not be empty")
+
+    for f in input_files:
+        if not Path(f).is_file():
+            raise FileNotFoundError(f"filename provided ({f}) does not exist")
+
+    if backend == "pymoab":
+        _check_pymoab_available()
+
+    combined_vol_data: Dict[int, Tuple[np.ndarray, np.ndarray]] = {}
+    combined_vol_mat: Dict[int, str] = {}
+    next_vol_id = 1
+
+    for filepath in input_files:
+        vol_mat = get_volumes_and_materials_from_h5m(
+            filename=filepath, remove_prefix=True, backend=backend
+        )
+        vol_data = get_triangle_conn_and_coords_by_volume(
+            filename=filepath, backend=backend
+        )
+
+        for old_vid in sorted(vol_data.keys()):
+            combined_vol_data[next_vol_id] = vol_data[old_vid]
+            combined_vol_mat[next_vol_id] = vol_mat[old_vid]
+            next_vol_id += 1
+
+    _write_h5m(output_file, combined_vol_data, combined_vol_mat)
+    return output_file

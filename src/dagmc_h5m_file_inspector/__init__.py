@@ -4,6 +4,7 @@ __version__ = version("dagmc_h5m_file_inspector")
 
 from .core import (
     BoundingBox,
+    combine_h5m_files,
     convert_h5m_to_vtkhdf,
     get_bounding_box_from_h5m,
     get_materials_from_h5m,
@@ -24,6 +25,7 @@ from .core import (
 
 __all__ = [
     "BoundingBox",
+    "combine_h5m_files",
     "convert_h5m_to_vtkhdf",
     "get_bounding_box_from_h5m",
     "get_materials_from_h5m",
