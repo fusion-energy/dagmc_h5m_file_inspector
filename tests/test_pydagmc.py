@@ -27,7 +27,7 @@ def test_volume_sizes_pydagmc_consistency(filename):
     """Verify our volume calculations match pydagmc results"""
 
     # Get volumes from our implementations
-    h5py_volumes = di.get_volumes_from_h5m_by_cell_id(filename, backend="h5py")
+    h5py_volumes = di.get_volumes_by_cell_id(filename, backend="h5py")
 
     # Get volumes from pydagmc
     with warnings.catch_warnings():

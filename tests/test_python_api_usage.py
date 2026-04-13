@@ -24,7 +24,7 @@ def test_volume_and_material_extraction_without_stripped_prefix(
     """Extracts the volume numbers and material ids from a dagmc file and
     checks the contents match the expected contents"""
 
-    dict_of_vol_and_mats = di.get_volumes_and_materials_from_h5m(
+    dict_of_vol_and_mats = di.get_volumes_and_materials(
         filename=touching_boxes["filename"],
         remove_prefix=False,
         backend=backend,
@@ -38,7 +38,7 @@ def test_volume_and_material_extraction_remove_prefix(touching_boxes, backend):
     """Extracts the volume numbers and material ids from a dagmc file and
     checks the contents match the expected contents"""
 
-    dict_of_vol_and_mats = di.get_volumes_and_materials_from_h5m(
+    dict_of_vol_and_mats = di.get_volumes_and_materials(
         filename=touching_boxes["filename"],
         backend=backend,
     )
@@ -51,7 +51,7 @@ def test_volume_extraction(touching_boxes, backend):
     """Extracts the volume ids from a dagmc file and checks the contents
     match the expected contents"""
 
-    volumes = di.get_volumes_from_h5m(
+    volumes = di.get_volumes(
         filename=touching_boxes["filename"],
         backend=backend,
     )
@@ -64,7 +64,7 @@ def test_surface_extraction(touching_boxes, backend):
     """Extracts the surface ids from a dagmc file and checks that
     surface ids are returned as a sorted list of integers"""
 
-    surfaces = di.get_surfaces_from_h5m(
+    surfaces = di.get_surface_ids(
         filename=touching_boxes["filename"],
         backend=backend,
     )
@@ -82,7 +82,7 @@ def test_surface_extraction_separated_boxes(separated_boxes, backend):
     """Extracts the surface ids from separated boxes and checks that
     surface ids are returned correctly"""
 
-    surfaces = di.get_surfaces_from_h5m(
+    surfaces = di.get_surface_ids(
         filename=separated_boxes["filename"],
         backend=backend,
     )
@@ -99,7 +99,7 @@ def test_surface_extraction_separated_boxes(separated_boxes, backend):
 def test_surface_extraction_cube(cube_geometry, backend):
     """A cube should have 6 surfaces"""
 
-    surfaces = di.get_surfaces_from_h5m(
+    surfaces = di.get_surface_ids(
         filename=cube_geometry["filename"],
         backend=backend,
     )
@@ -111,7 +111,7 @@ def test_surface_extraction_cube(cube_geometry, backend):
 def test_surface_extraction_cylinder(cylinder_geometry, backend):
     """A cylinder should have 3 surfaces (top cap, bottom cap, lateral)"""
 
-    surfaces = di.get_surfaces_from_h5m(
+    surfaces = di.get_surface_ids(
         filename=cylinder_geometry["filename"],
         backend=backend,
     )
@@ -124,7 +124,7 @@ def test_surface_extraction_file_not_found(backend):
     """Checks that a FileNotFoundError is raised for missing files"""
 
     with pytest.raises(FileNotFoundError):
-        di.get_surfaces_from_h5m(
+        di.get_surface_ids(
             filename="non_existant.h5m",
             backend=backend,
         )
@@ -132,14 +132,14 @@ def test_surface_extraction_file_not_found(backend):
 
 @pytest.mark.parametrize("backend", ["h5py", "pymoab"])
 def test_surface_filter_openmc_transport(touching_boxes, backend, tmp_path):
-    """Verify that surface IDs from get_surfaces_from_h5m can be used in an
+    """Verify that surface IDs from get_surface_ids can be used in an
     OpenMC SurfaceFilter tally with DAGMC geometry."""
     import openmc
 
     filename = touching_boxes["filename"]
 
     # Get surface IDs using the inspector
-    surface_ids = di.get_surfaces_from_h5m(filename=filename, backend=backend)
+    surface_ids = di.get_surface_ids(filename=filename, backend=backend)
     assert len(surface_ids) > 0
 
     # Set up cross sections (H1 only)
@@ -214,7 +214,7 @@ def test_material_extraction_no_remove_prefix(touching_boxes, backend):
     """Extracts the materials tags from a dagmc file and checks the
     contents match the expected contents"""
 
-    materials = di.get_materials_from_h5m(
+    materials = di.get_materials(
         filename=touching_boxes["filename"],
         remove_prefix=False,
         backend=backend,
@@ -228,7 +228,7 @@ def test_material_extraction_remove_prefix(touching_boxes, backend):
     """Extracts the materials tags from a dagmc file and checks the
     contents match the expected contents"""
 
-    materials = di.get_materials_from_h5m(
+    materials = di.get_materials(
         filename=touching_boxes["filename"],
         backend=backend,
     )
@@ -242,7 +242,7 @@ def test_fail_with_missing_input_files(backend):
     handling is working"""
 
     with pytest.raises(FileNotFoundError):
-        di.get_volumes_and_materials_from_h5m(
+        di.get_volumes_and_materials(
             filename="non_existant.h5m",
             backend=backend,
         )
@@ -253,7 +253,7 @@ def test_bounding_box(touching_boxes, backend):
     """Extracts the bounding box from a dagmc file and checks it matches
     the expected geometry bounds"""
 
-    bb = di.get_bounding_box_from_h5m(
+    bb = di.get_bounding_box(
         filename=touching_boxes["filename"],
         backend=backend,
     )
@@ -267,7 +267,7 @@ def test_bounding_box_single_material(touching_boxes, backend):
     """Bounding box for a single material (small_box) should match that
     volume's geometry only"""
 
-    bb = di.get_bounding_box_from_h5m(
+    bb = di.get_bounding_box(
         filename=touching_boxes["filename"],
         materials="small_box",
         backend=backend,
@@ -286,7 +286,7 @@ def test_bounding_box_single_material_big(touching_boxes, backend):
     """Bounding box for a single material (big_box) should match that
     volume's geometry only"""
 
-    bb = di.get_bounding_box_from_h5m(
+    bb = di.get_bounding_box(
         filename=touching_boxes["filename"],
         materials="big_box",
         backend=backend,
@@ -305,7 +305,7 @@ def test_bounding_box_material_list(touching_boxes, backend):
     """Bounding box for all materials as a list should match the global
     bounding box"""
 
-    bb = di.get_bounding_box_from_h5m(
+    bb = di.get_bounding_box(
         filename=touching_boxes["filename"],
         materials=["small_box", "big_box"],
         backend=backend,
@@ -319,13 +319,13 @@ def test_bounding_box_material_list(touching_boxes, backend):
 def test_bounding_box_single_material_string(touching_boxes, backend):
     """Passing a single string should give the same result as a single-element list"""
 
-    bb_str = di.get_bounding_box_from_h5m(
+    bb_str = di.get_bounding_box(
         filename=touching_boxes["filename"],
         materials="small_box",
         backend=backend,
     )
 
-    bb_list = di.get_bounding_box_from_h5m(
+    bb_list = di.get_bounding_box(
         filename=touching_boxes["filename"],
         materials=["small_box"],
         backend=backend,
@@ -340,7 +340,7 @@ def test_bounding_box_invalid_material(touching_boxes, backend):
     """Passing a material name not in the file should raise ValueError"""
 
     with pytest.raises(ValueError):
-        di.get_bounding_box_from_h5m(
+        di.get_bounding_box(
             filename=touching_boxes["filename"],
             materials="nonexistent",
             backend=backend,
@@ -351,7 +351,7 @@ def test_bounding_box_invalid_material(touching_boxes, backend):
 def test_bounding_box_returns_bounding_box_type(touching_boxes, backend):
     """The return type should be BoundingBox"""
 
-    bb = di.get_bounding_box_from_h5m(
+    bb = di.get_bounding_box(
         filename=touching_boxes["filename"],
         backend=backend,
     )
@@ -363,7 +363,7 @@ def test_bounding_box_returns_bounding_box_type(touching_boxes, backend):
 def test_bounding_box_properties(touching_boxes, backend):
     """BoundingBox properties should return correct values"""
 
-    bb = di.get_bounding_box_from_h5m(
+    bb = di.get_bounding_box(
         filename=touching_boxes["filename"],
         backend=backend,
     )
@@ -388,7 +388,7 @@ def test_volume_sizes_by_cell_id(touching_boxes, backend):
     """Extracts the geometric volumes from a dagmc file and checks they
     match the expected cube volumes"""
 
-    volume_sizes = di.get_volumes_from_h5m_by_cell_id(
+    volume_sizes = di.get_volumes_by_cell_id(
         filename=touching_boxes["filename"],
         backend=backend,
     )
@@ -405,7 +405,7 @@ def test_volume_sizes_by_cell_id(touching_boxes, backend):
 def test_volume_sizes_by_material_name(touching_boxes, backend):
     """Extracts the geometric volumes by material name from a dagmc file"""
 
-    volume_sizes = di.get_volumes_from_h5m_by_material_name(
+    volume_sizes = di.get_volumes_by_material_name(
         filename=touching_boxes["filename"],
         backend=backend,
     )
@@ -426,7 +426,7 @@ def test_volume_sizes_by_material_name(touching_boxes, backend):
 def test_volume_sizes_by_cell_id_and_material_name(touching_boxes, backend):
     """Extracts the geometric volumes by cell ID and material name from a dagmc file"""
 
-    volume_sizes = di.get_volumes_from_h5m_by_cell_id_and_material_name(
+    volume_sizes = di.get_volumes_by_cell_id_and_material_name(
         filename=touching_boxes["filename"],
         backend=backend,
     )
@@ -452,7 +452,7 @@ def test_volume_sizes_by_cell_id_and_material_name(touching_boxes, backend):
 def test_separated_volume_and_material_extraction(separated_boxes, backend):
     """Extracts the volume numbers and material ids from separated boxes"""
 
-    dict_of_vol_and_mats = di.get_volumes_and_materials_from_h5m(
+    dict_of_vol_and_mats = di.get_volumes_and_materials(
         filename=separated_boxes["filename"],
         backend=backend,
     )
@@ -464,7 +464,7 @@ def test_separated_volume_and_material_extraction(separated_boxes, backend):
 def test_separated_volume_extraction(separated_boxes, backend):
     """Extracts the volume ids from separated boxes"""
 
-    volumes = di.get_volumes_from_h5m(
+    volumes = di.get_volumes(
         filename=separated_boxes["filename"],
         backend=backend,
     )
@@ -476,7 +476,7 @@ def test_separated_volume_extraction(separated_boxes, backend):
 def test_separated_material_extraction(separated_boxes, backend):
     """Extracts the materials tags from separated boxes"""
 
-    materials = di.get_materials_from_h5m(
+    materials = di.get_materials(
         filename=separated_boxes["filename"],
         backend=backend,
     )
@@ -488,7 +488,7 @@ def test_separated_material_extraction(separated_boxes, backend):
 def test_separated_bounding_box(separated_boxes, backend):
     """Extracts the bounding box from separated boxes"""
 
-    bb = di.get_bounding_box_from_h5m(
+    bb = di.get_bounding_box(
         filename=separated_boxes["filename"],
         backend=backend,
     )
@@ -503,7 +503,7 @@ def test_separated_bounding_box(separated_boxes, backend):
 def test_separated_bounding_box_single_material(separated_boxes, backend):
     """Bounding box for a single material (box_a) in separated geometry"""
 
-    bb = di.get_bounding_box_from_h5m(
+    bb = di.get_bounding_box(
         filename=separated_boxes["filename"],
         materials="box_a",
         backend=backend,
@@ -522,7 +522,7 @@ def test_separated_bounding_box_material_list(separated_boxes, backend):
     """Bounding box for all materials as a list should match the global
     bounding box for separated geometry"""
 
-    bb = di.get_bounding_box_from_h5m(
+    bb = di.get_bounding_box(
         filename=separated_boxes["filename"],
         materials=["box_a", "box_b"],
         backend=backend,
@@ -539,7 +539,7 @@ def test_separated_volume_sizes_by_cell_id(separated_boxes, backend):
     """Extracts the geometric volumes from separated boxes and checks they
     match the expected cube volumes"""
 
-    volume_sizes = di.get_volumes_from_h5m_by_cell_id(
+    volume_sizes = di.get_volumes_by_cell_id(
         filename=separated_boxes["filename"],
         backend=backend,
     )
@@ -556,7 +556,7 @@ def test_separated_volume_sizes_by_cell_id(separated_boxes, backend):
 def test_separated_volume_sizes_by_material_name(separated_boxes, backend):
     """Extracts the geometric volumes by material name from separated boxes"""
 
-    volume_sizes = di.get_volumes_from_h5m_by_material_name(
+    volume_sizes = di.get_volumes_by_material_name(
         filename=separated_boxes["filename"],
         backend=backend,
     )
@@ -577,7 +577,7 @@ def test_separated_volume_sizes_by_material_name(separated_boxes, backend):
 def test_separated_volume_sizes_by_cell_id_and_material_name(separated_boxes, backend):
     """Extracts geometric volumes by cell ID and material name from separated boxes."""
 
-    volume_sizes = di.get_volumes_from_h5m_by_cell_id_and_material_name(
+    volume_sizes = di.get_volumes_by_cell_id_and_material_name(
         filename=separated_boxes["filename"],
         backend=backend,
     )
@@ -619,8 +619,8 @@ H5M_TEST_FILES = [
 def test_volume_ids_h5py_pymoab_consistency(filename):
     """Verify h5py and pymoab backends return the same volume IDs"""
 
-    h5py_volumes = di.get_volumes_from_h5m(filename, backend="h5py")
-    pymoab_volumes = di.get_volumes_from_h5m(filename, backend="pymoab")
+    h5py_volumes = di.get_volumes(filename, backend="h5py")
+    pymoab_volumes = di.get_volumes(filename, backend="pymoab")
 
     assert h5py_volumes == pymoab_volumes, (
         f"Volume IDs differ: h5py={h5py_volumes}, pymoab={pymoab_volumes}"
@@ -631,8 +631,8 @@ def test_volume_ids_h5py_pymoab_consistency(filename):
 def test_surface_ids_h5py_pymoab_consistency(filename):
     """Verify h5py and pymoab backends return the same surface IDs"""
 
-    h5py_surfaces = di.get_surfaces_from_h5m(filename, backend="h5py")
-    pymoab_surfaces = di.get_surfaces_from_h5m(filename, backend="pymoab")
+    h5py_surfaces = di.get_surface_ids(filename, backend="h5py")
+    pymoab_surfaces = di.get_surface_ids(filename, backend="pymoab")
 
     assert h5py_surfaces == pymoab_surfaces, (
         f"Surface IDs differ: h5py={h5py_surfaces}, pymoab={pymoab_surfaces}"
@@ -643,8 +643,8 @@ def test_surface_ids_h5py_pymoab_consistency(filename):
 def test_material_tags_h5py_pymoab_consistency(filename):
     """Verify h5py and pymoab backends return the same material tags"""
 
-    h5py_materials = di.get_materials_from_h5m(filename, backend="h5py")
-    pymoab_materials = di.get_materials_from_h5m(filename, backend="pymoab")
+    h5py_materials = di.get_materials(filename, backend="h5py")
+    pymoab_materials = di.get_materials(filename, backend="pymoab")
 
     assert h5py_materials == pymoab_materials, (
         f"Material tags differ: h5py={h5py_materials}, pymoab={pymoab_materials}"
@@ -655,8 +655,8 @@ def test_material_tags_h5py_pymoab_consistency(filename):
 def test_volumes_and_materials_h5py_pymoab_consistency(filename):
     """Verify h5py and pymoab backends return the same volume-to-material mapping"""
 
-    h5py_mapping = di.get_volumes_and_materials_from_h5m(filename, backend="h5py")
-    pymoab_mapping = di.get_volumes_and_materials_from_h5m(filename, backend="pymoab")
+    h5py_mapping = di.get_volumes_and_materials(filename, backend="h5py")
+    pymoab_mapping = di.get_volumes_and_materials(filename, backend="pymoab")
 
     assert h5py_mapping == pymoab_mapping, (
         f"Volume-material mapping differs: h5py={h5py_mapping}, pymoab={pymoab_mapping}"
@@ -667,8 +667,8 @@ def test_volumes_and_materials_h5py_pymoab_consistency(filename):
 def test_volume_sizes_h5py_pymoab_consistency(filename):
     """Verify h5py and pymoab backends produce the same volume calculations"""
 
-    h5py_volumes = di.get_volumes_from_h5m_by_cell_id(filename, backend="h5py")
-    pymoab_volumes = di.get_volumes_from_h5m_by_cell_id(filename, backend="pymoab")
+    h5py_volumes = di.get_volumes_by_cell_id(filename, backend="h5py")
+    pymoab_volumes = di.get_volumes_by_cell_id(filename, backend="pymoab")
 
     # Check same volume IDs are returned
     assert set(h5py_volumes.keys()) == set(pymoab_volumes.keys()), (
@@ -699,10 +699,8 @@ def test_volume_sizes_h5py_pymoab_consistency(filename):
 def test_volume_sizes_by_material_h5py_pymoab_consistency(filename):
     """Verify h5py and pymoab produce the same volume calculations by material."""
 
-    h5py_volumes = di.get_volumes_from_h5m_by_material_name(filename, backend="h5py")
-    pymoab_volumes = di.get_volumes_from_h5m_by_material_name(
-        filename, backend="pymoab"
-    )
+    h5py_volumes = di.get_volumes_by_material_name(filename, backend="h5py")
+    pymoab_volumes = di.get_volumes_by_material_name(filename, backend="pymoab")
 
     # Check same material names are returned
     assert set(h5py_volumes.keys()) == set(pymoab_volumes.keys()), (
@@ -749,7 +747,7 @@ def test_set_openmc_material_volumes_with_list(touching_boxes, backend):
     assert big_box_mat.volume is None
 
     # Set volumes from DAGMC file
-    di.set_openmc_material_volumes_from_h5m(
+    di.set_openmc_material_volumes(
         materials=materials,
         filename=touching_boxes["filename"],
         backend=backend,
@@ -773,7 +771,7 @@ def test_set_openmc_material_volumes_with_materials_object(touching_boxes, backe
     materials = openmc.Materials([small_box_mat, big_box_mat])
 
     # Set volumes from DAGMC file
-    di.set_openmc_material_volumes_from_h5m(
+    di.set_openmc_material_volumes(
         materials=materials,
         filename=touching_boxes["filename"],
         backend=backend,
@@ -796,7 +794,7 @@ def test_set_openmc_material_volumes_non_matching_materials(touching_boxes, back
     materials = [small_box_mat, unmatched_mat]
 
     # Set volumes from DAGMC file
-    di.set_openmc_material_volumes_from_h5m(
+    di.set_openmc_material_volumes(
         materials=materials,
         filename=touching_boxes["filename"],
         backend=backend,
@@ -824,7 +822,7 @@ def test_set_openmc_material_volumes_duplicate_names_error(touching_boxes, backe
     with pytest.raises(
         ValueError, match="Multiple OpenMC materials have the same name"
     ):
-        di.set_openmc_material_volumes_from_h5m(
+        di.set_openmc_material_volumes(
             materials=materials,
             filename=touching_boxes["filename"],
             backend=backend,
@@ -840,7 +838,7 @@ def test_set_openmc_material_volumes_file_not_found(backend):
     materials = [mat]
 
     with pytest.raises(FileNotFoundError):
-        di.set_openmc_material_volumes_from_h5m(
+        di.set_openmc_material_volumes(
             materials=materials,
             filename="nonexistent_file.h5m",
             backend=backend,
@@ -858,7 +856,7 @@ def test_set_openmc_material_volumes_with_none_names(touching_boxes, backend):
     materials = [small_box_mat, unnamed_mat]
 
     # Should not raise error, unnamed materials are skipped
-    di.set_openmc_material_volumes_from_h5m(
+    di.set_openmc_material_volumes(
         materials=materials,
         filename=touching_boxes["filename"],
         backend=backend,
@@ -913,8 +911,8 @@ def test_volume_sizes_openmc_stochastic_consistency(filename, tmp_path):
     openmc.config["cross_sections"] = xs_xml
 
     # Get volumes and materials from our implementation
-    bb = di.get_bounding_box_from_h5m(abs_filename)
-    materials_list = di.get_materials_from_h5m(abs_filename, remove_prefix=True)
+    bb = di.get_bounding_box(abs_filename)
+    materials_list = di.get_materials(abs_filename, remove_prefix=True)
 
     # Create OpenMC materials matching the DAGMC file
     openmc_mats = []
@@ -965,7 +963,7 @@ def test_volume_sizes_openmc_stochastic_consistency(filename, tmp_path):
                     break
 
         # Get our volumes by material name for comparison
-        h5py_volumes_by_mat = di.get_volumes_from_h5m_by_material_name(
+        h5py_volumes_by_mat = di.get_volumes_by_material_name(
             abs_filename, backend="h5py"
         )
 
@@ -1244,7 +1242,7 @@ def test_convert_h5m_to_vtkhdf_cell_data(touching_boxes, tmp_path):
         vtkhdf_filename=output_file,
     )
 
-    vol_mat = di.get_volumes_and_materials_from_h5m(
+    vol_mat = di.get_volumes_and_materials(
         filename=touching_boxes["filename"],
     )
     per_vol = di.get_triangle_conn_and_coords_by_volume(
@@ -1312,7 +1310,7 @@ def test_convert_h5m_to_vtkhdf_file_not_found():
 
 
 # ============================================================================
-# Tests for remove_materials_from_h5m
+# Tests for remove_materials
 # ============================================================================
 
 
@@ -1322,13 +1320,13 @@ def test_remove_single_material(touching_boxes, backend, tmp_path):
     input_file = touching_boxes["filename"]
 
     # Check materials and volumes before removal
-    mats_before = di.get_materials_from_h5m(input_file, backend="pymoab")
-    vols_before = di.get_volumes_from_h5m(input_file, backend="pymoab")
+    mats_before = di.get_materials(input_file, backend="pymoab")
+    vols_before = di.get_volumes(input_file, backend="pymoab")
     assert "small_box" in mats_before
     assert "big_box" in mats_before
 
     output = str(tmp_path / f"removed_{backend}.h5m")
-    removed = di.remove_materials_from_h5m(
+    removed = di.remove_materials(
         input_filename=input_file,
         output_filename=output,
         materials_to_remove="small_box",
@@ -1336,10 +1334,10 @@ def test_remove_single_material(touching_boxes, backend, tmp_path):
     )
     assert removed == ["small_box"]
 
-    mats_after = di.get_materials_from_h5m(output, backend="pymoab")
+    mats_after = di.get_materials(output, backend="pymoab")
     assert mats_after == ["big_box"]
 
-    vols_after = di.get_volumes_from_h5m(output, backend="pymoab")
+    vols_after = di.get_volumes(output, backend="pymoab")
     assert len(vols_after) == 1
 
     assert len(mats_after) < len(mats_before)
@@ -1350,7 +1348,7 @@ def test_remove_single_material(touching_boxes, backend, tmp_path):
 def test_remove_multiple_materials(separated_boxes, backend, tmp_path):
     """Remove all materials, verify empty result."""
     output = str(tmp_path / f"removed_all_{backend}.h5m")
-    removed = di.remove_materials_from_h5m(
+    removed = di.remove_materials(
         input_filename=separated_boxes["filename"],
         output_filename=output,
         materials_to_remove=["box_a", "box_b"],
@@ -1359,7 +1357,7 @@ def test_remove_multiple_materials(separated_boxes, backend, tmp_path):
     assert removed == ["box_a", "box_b"]
 
     # Use h5py to read (empty files may not be loadable by pymoab)
-    mats = di.get_materials_from_h5m(output, backend="h5py")
+    mats = di.get_materials(output, backend="h5py")
     assert mats == []
 
 
@@ -1367,14 +1365,14 @@ def test_remove_multiple_materials(separated_boxes, backend, tmp_path):
 def test_remove_material_string_input(separated_boxes, backend, tmp_path):
     """Single string accepted for materials_to_remove."""
     output = str(tmp_path / f"string_{backend}.h5m")
-    removed = di.remove_materials_from_h5m(
+    removed = di.remove_materials(
         input_filename=separated_boxes["filename"],
         output_filename=output,
         materials_to_remove="box_b",
         backend=backend,
     )
     assert removed == ["box_b"]
-    mats = di.get_materials_from_h5m(output, backend="pymoab")
+    mats = di.get_materials(output, backend="pymoab")
     assert mats == ["box_a"]
 
 
@@ -1383,7 +1381,7 @@ def test_remove_nonexistent_material_raises(separated_boxes, backend, tmp_path):
     """ValueError when material not found."""
     output = str(tmp_path / f"nope_{backend}.h5m")
     with pytest.raises(ValueError, match="None of the specified materials"):
-        di.remove_materials_from_h5m(
+        di.remove_materials(
             input_filename=separated_boxes["filename"],
             output_filename=output,
             materials_to_remove="nonexistent",
@@ -1396,7 +1394,7 @@ def test_remove_material_file_not_found(backend, tmp_path):
     """FileNotFoundError for missing input."""
     output = str(tmp_path / "out.h5m")
     with pytest.raises(FileNotFoundError):
-        di.remove_materials_from_h5m(
+        di.remove_materials(
             input_filename="does_not_exist.h5m",
             output_filename=output,
             materials_to_remove="mat",
@@ -1414,7 +1412,7 @@ def test_input_file_not_modified(separated_boxes, backend, tmp_path):
         hash_before = hashlib.md5(fh.read()).hexdigest()
 
     output = str(tmp_path / f"modified_check_{backend}.h5m")
-    di.remove_materials_from_h5m(
+    di.remove_materials(
         input_filename=input_file,
         output_filename=output,
         materials_to_remove="box_a",
@@ -1432,13 +1430,13 @@ def test_remove_materials_h5py_pymoab_consistency(touching_boxes, tmp_path):
     output_h5py = str(tmp_path / "h5py_out.h5m")
     output_pymoab = str(tmp_path / "pymoab_out.h5m")
 
-    di.remove_materials_from_h5m(
+    di.remove_materials(
         input_filename=touching_boxes["filename"],
         output_filename=output_h5py,
         materials_to_remove="small_box",
         backend="h5py",
     )
-    di.remove_materials_from_h5m(
+    di.remove_materials(
         input_filename=touching_boxes["filename"],
         output_filename=output_pymoab,
         materials_to_remove="small_box",
@@ -1446,19 +1444,19 @@ def test_remove_materials_h5py_pymoab_consistency(touching_boxes, tmp_path):
     )
 
     # Read each output with pymoab (which can read both formats)
-    mats_h5py = di.get_materials_from_h5m(output_h5py, backend="pymoab")
-    mats_pymoab = di.get_materials_from_h5m(output_pymoab, backend="pymoab")
+    mats_h5py = di.get_materials(output_h5py, backend="pymoab")
+    mats_pymoab = di.get_materials(output_pymoab, backend="pymoab")
     assert mats_h5py == mats_pymoab
 
-    vols_h5py = di.get_volumes_from_h5m(output_h5py, backend="pymoab")
-    vols_pymoab = di.get_volumes_from_h5m(output_pymoab, backend="pymoab")
+    vols_h5py = di.get_volumes(output_h5py, backend="pymoab")
+    vols_pymoab = di.get_volumes(output_pymoab, backend="pymoab")
     assert len(vols_h5py) == len(vols_pymoab)
 
 
 def test_output_readable_by_both_backends(separated_boxes, tmp_path):
     """Output from h5py backend readable by pymoab and vice versa."""
     output_h5py = str(tmp_path / "from_h5py.h5m")
-    di.remove_materials_from_h5m(
+    di.remove_materials(
         input_filename=separated_boxes["filename"],
         output_filename=output_h5py,
         materials_to_remove="box_a",
@@ -1466,12 +1464,12 @@ def test_output_readable_by_both_backends(separated_boxes, tmp_path):
     )
 
     # h5py-written output should be readable by both backends
-    mats_via_h5py = di.get_materials_from_h5m(output_h5py, backend="h5py")
-    mats_via_pymoab = di.get_materials_from_h5m(output_h5py, backend="pymoab")
+    mats_via_h5py = di.get_materials(output_h5py, backend="h5py")
+    mats_via_pymoab = di.get_materials(output_h5py, backend="pymoab")
     assert mats_via_h5py == mats_via_pymoab
 
     output_pymoab = str(tmp_path / "from_pymoab.h5m")
-    di.remove_materials_from_h5m(
+    di.remove_materials(
         input_filename=separated_boxes["filename"],
         output_filename=output_pymoab,
         materials_to_remove="box_a",
@@ -1479,20 +1477,20 @@ def test_output_readable_by_both_backends(separated_boxes, tmp_path):
     )
 
     # pymoab-written output should be readable by pymoab
-    mats_via_pymoab2 = di.get_materials_from_h5m(output_pymoab, backend="pymoab")
+    mats_via_pymoab2 = di.get_materials(output_pymoab, backend="pymoab")
     assert mats_via_pymoab2 == ["box_b"]
 
 
 @pytest.mark.parametrize("backend", ["h5py", "pymoab"])
 def test_remove_material_openmc_transport(touching_boxes, backend, tmp_path):
-    """Verify that the h5m file produced by remove_materials_from_h5m is a
+    """Verify that the h5m file produced by remove_materials is a
     valid DAGMC geometry by running OpenMC fixed-source particle transport
     through it.
     """
     import openmc
 
     output = str(tmp_path / f"transport_{backend}.h5m")
-    di.remove_materials_from_h5m(
+    di.remove_materials(
         input_filename=touching_boxes["filename"],
         output_filename=output,
         materials_to_remove="small_box",
@@ -1523,7 +1521,7 @@ def test_remove_material_openmc_transport(touching_boxes, backend, tmp_path):
     geometry = openmc.Geometry(root=bound_dag_univ)
 
     # Point source near center of big_box
-    bb = di.get_bounding_box_from_h5m(output, materials="big_box")
+    bb = di.get_bounding_box(output, materials="big_box")
     center = bb.center
     source = openmc.IndependentSource()
     source.space = openmc.stats.Point(
@@ -1762,6 +1760,189 @@ def test_surface_area_by_material_name_rectangle(rectangle_geometry, backend):
 
 
 # ============================================================================
+# Tests for get_surface_area_by_surface_id
+# ============================================================================
+
+
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+def test_surface_area_by_surface_id_cube(cube_geometry, backend):
+    """A cube has 6 surfaces each with area 100."""
+    result = di.get_surface_area_by_surface_id(
+        filename=cube_geometry["filename"],
+        backend=backend,
+    )
+
+    assert isinstance(result, dict)
+    assert len(result) == cube_geometry["expected_num_surfaces"]
+    for surf_id, area in result.items():
+        assert isinstance(surf_id, int)
+        assert area == pytest.approx(
+            cube_geometry["expected_surface_area_each"], rel=0.05
+        )
+
+
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+def test_surface_area_by_surface_id_sphere(sphere_geometry, backend):
+    """Total surface area of a sphere should match 4*pi*r^2."""
+    result = di.get_surface_area_by_surface_id(
+        filename=sphere_geometry["filename"],
+        backend=backend,
+    )
+
+    assert len(result) == 1
+    total_area = sum(result.values())
+    assert total_area == pytest.approx(
+        sphere_geometry["expected_total_surface_area"], rel=0.05
+    )
+
+
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+def test_surface_area_by_surface_id_cylinder(cylinder_geometry, backend):
+    """A cylinder has 3 surfaces: two caps and one lateral."""
+    result = di.get_surface_area_by_surface_id(
+        filename=cylinder_geometry["filename"],
+        backend=backend,
+    )
+
+    assert len(result) == cylinder_geometry["expected_num_surfaces"]
+    total_area = sum(result.values())
+    assert total_area == pytest.approx(
+        cylinder_geometry["expected_total_surface_area"], rel=0.05
+    )
+
+
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+def test_surface_area_by_surface_id_keys_match_surfaces(cube_geometry, backend):
+    """Surface IDs from get_surface_area_by_surface_id should match
+    get_surface_ids."""
+    areas = di.get_surface_area_by_surface_id(
+        filename=cube_geometry["filename"],
+        backend=backend,
+    )
+    surface_ids = di.get_surface_ids(
+        filename=cube_geometry["filename"],
+        backend=backend,
+    )
+
+    assert sorted(areas.keys()) == surface_ids
+
+
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+def test_surface_area_by_surface_id_file_not_found(backend):
+    """Checks that a FileNotFoundError is raised for missing files."""
+    with pytest.raises(FileNotFoundError):
+        di.get_surface_area_by_surface_id(
+            filename="non_existant.h5m",
+            backend=backend,
+        )
+
+
+@pytest.mark.parametrize("filename", H5M_TEST_FILES)
+def test_surface_area_by_surface_id_h5py_pymoab_consistency(filename):
+    """Verify h5py and pymoab backends return the same surface areas."""
+    h5py_result = di.get_surface_area_by_surface_id(filename, backend="h5py")
+    pymoab_result = di.get_surface_area_by_surface_id(filename, backend="pymoab")
+
+    assert sorted(h5py_result.keys()) == sorted(pymoab_result.keys()), (
+        f"Surface IDs differ: h5py={sorted(h5py_result.keys())}, "
+        f"pymoab={sorted(pymoab_result.keys())}"
+    )
+
+    for surf_id in h5py_result:
+        assert h5py_result[surf_id] == pytest.approx(
+            pymoab_result[surf_id], rel=1e-10
+        ), (
+            f"Surface {surf_id} area differs: "
+            f"h5py={h5py_result[surf_id]}, pymoab={pymoab_result[surf_id]}"
+        )
+
+
+# ============================================================================
+# Tests for get_surface_ids_by_cell_id
+# ============================================================================
+
+
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+def test_surface_ids_by_cell_id_cube(cube_geometry, backend):
+    """A cube (cell_id=1) should have 6 bounding surfaces."""
+    result = di.get_surface_ids_by_cell_id(
+        filename=cube_geometry["filename"],
+        cell_id=cube_geometry["cell_id"],
+        backend=backend,
+    )
+
+    assert isinstance(result, list)
+    assert result == sorted(result)
+    assert len(result) == cube_geometry["expected_num_surfaces"]
+
+
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+def test_surface_ids_by_cell_id_touching_boxes(touching_boxes, backend):
+    """Each volume in touching boxes should have bounding surfaces."""
+    for cell_id in touching_boxes["volumes"]:
+        result = di.get_surface_ids_by_cell_id(
+            filename=touching_boxes["filename"],
+            cell_id=cell_id,
+            backend=backend,
+        )
+        assert len(result) > 0
+        assert all(isinstance(s, int) for s in result)
+
+
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+def test_surface_ids_by_cell_id_invalid(cube_geometry, backend):
+    """Invalid cell_id should raise ValueError."""
+    with pytest.raises(ValueError):
+        di.get_surface_ids_by_cell_id(
+            filename=cube_geometry["filename"],
+            cell_id=999,
+            backend=backend,
+        )
+
+
+# ============================================================================
+# Tests for get_surface_ids_by_material_name
+# ============================================================================
+
+
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+def test_surface_ids_by_material_name_cube(cube_geometry, backend):
+    """A cube with material 'cube' should have 6 bounding surfaces."""
+    result = di.get_surface_ids_by_material_name(
+        filename=cube_geometry["filename"],
+        material=cube_geometry["material"],
+        backend=backend,
+    )
+
+    assert isinstance(result, list)
+    assert result == sorted(result)
+    assert len(result) == cube_geometry["expected_num_surfaces"]
+
+
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+def test_surface_ids_by_material_name_touching_boxes(touching_boxes, backend):
+    """Each material in touching boxes should have bounding surfaces."""
+    for material in touching_boxes["materials"]:
+        result = di.get_surface_ids_by_material_name(
+            filename=touching_boxes["filename"],
+            material=material,
+            backend=backend,
+        )
+        assert len(result) > 0
+
+
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+def test_surface_ids_by_material_name_invalid(cube_geometry, backend):
+    """Invalid material name should raise ValueError."""
+    with pytest.raises(ValueError):
+        di.get_surface_ids_by_material_name(
+            filename=cube_geometry["filename"],
+            material="nonexistent",
+            backend=backend,
+        )
+
+
+# ============================================================================
 # Tests for get_surface_shared_status
 # ============================================================================
 
@@ -1837,7 +2018,7 @@ def test_rotate_around_axis_z(rectangle_geometry, tmp_path, backend):
         output=output,
         backend=backend,
     )
-    bbox = di.get_bounding_box_from_h5m(output)
+    bbox = di.get_bounding_box(output)
     # Original: x in [-5, 5] (width 10), y in [-10, 10] (width 20)
     # After 90-deg z rotation: x-width should become ~20, y-width should become ~10
     assert bbox.width[0] == pytest.approx(20.0, rel=1e-6)
@@ -1856,7 +2037,7 @@ def test_rotate_around_axis_x(rectangle_geometry, tmp_path, backend):
         output=output,
         backend=backend,
     )
-    bbox = di.get_bounding_box_from_h5m(output)
+    bbox = di.get_bounding_box(output)
     # Original: y in [-10, 10] (width 20), z in [-15, 15] (width 30)
     # After 90-deg x rotation: y-width should become ~30, z-width should become ~20
     assert bbox.width[0] == pytest.approx(10.0, rel=1e-6)
@@ -1875,7 +2056,7 @@ def test_rotate_around_axis_y(rectangle_geometry, tmp_path, backend):
         output=output,
         backend=backend,
     )
-    bbox = di.get_bounding_box_from_h5m(output)
+    bbox = di.get_bounding_box(output)
     # Original: x in [-5, 5] (width 10), z in [-15, 15] (width 30)
     # After 90-deg y rotation: x-width should become ~30, z-width should become ~10
     assert bbox.width[0] == pytest.approx(30.0, rel=1e-6)
@@ -1894,8 +2075,8 @@ def test_rotate_around_axis_360(rectangle_geometry, tmp_path, backend):
         output=output,
         backend=backend,
     )
-    original_bbox = di.get_bounding_box_from_h5m(rectangle_geometry["filename"])
-    rotated_bbox = di.get_bounding_box_from_h5m(output)
+    original_bbox = di.get_bounding_box(rectangle_geometry["filename"])
+    rotated_bbox = di.get_bounding_box(output)
     for i in range(3):
         assert rotated_bbox.width[i] == pytest.approx(original_bbox.width[i], rel=1e-6)
 
@@ -1911,8 +2092,8 @@ def test_rotate_around_axis_materials_preserved(rectangle_geometry, tmp_path, ba
         output=output,
         backend=backend,
     )
-    original_mats = di.get_materials_from_h5m(rectangle_geometry["filename"])
-    rotated_mats = di.get_materials_from_h5m(output)
+    original_mats = di.get_materials(rectangle_geometry["filename"])
+    rotated_mats = di.get_materials(output)
     assert original_mats == rotated_mats
 
 
@@ -1963,7 +2144,7 @@ def test_rotate_around_axis_openmc_transport(touching_boxes, backend, tmp_path):
     openmc.config["cross_sections"] = xs_xml
 
     # Create materials matching the DAGMC file
-    vol_mat = di.get_volumes_and_materials_from_h5m(output)
+    vol_mat = di.get_volumes_and_materials(output)
     mat_names = sorted(set(vol_mat.values()))
     openmc_mats = []
     for name in mat_names:
@@ -1978,13 +2159,12 @@ def test_rotate_around_axis_openmc_transport(touching_boxes, backend, tmp_path):
     bound_dag_univ = dag_univ.bounded_universe()
     geometry = openmc.Geometry(root=bound_dag_univ)
 
-    # Point source near center of geometry
-    bb = di.get_bounding_box_from_h5m(output)
+    # Point source inside a known material volume
+    first_mat = mat_names[0]
+    bb = di.get_bounding_box(output, materials=first_mat)
     center = bb.center
     source = openmc.IndependentSource()
-    source.space = openmc.stats.Point(
-        (center[0] + 0.1, center[1] + 0.1, center[2] + 0.1)
-    )
+    source.space = openmc.stats.Point(center)
     source.angle = openmc.stats.Isotropic()
     source.energy = openmc.stats.Discrete([14e6], [1])
 
@@ -2032,8 +2212,8 @@ def test_move_x(cube_geometry, tmp_path, backend):
         output=output,
         backend=backend,
     )
-    original_bbox = di.get_bounding_box_from_h5m(cube_geometry["filename"])
-    moved_bbox = di.get_bounding_box_from_h5m(output)
+    original_bbox = di.get_bounding_box(cube_geometry["filename"])
+    moved_bbox = di.get_bounding_box(output)
     assert moved_bbox.center[0] == pytest.approx(
         original_bbox.center[0] + 100.0, rel=1e-6
     )
@@ -2051,8 +2231,8 @@ def test_move_y(cube_geometry, tmp_path, backend):
         output=output,
         backend=backend,
     )
-    original_bbox = di.get_bounding_box_from_h5m(cube_geometry["filename"])
-    moved_bbox = di.get_bounding_box_from_h5m(output)
+    original_bbox = di.get_bounding_box(cube_geometry["filename"])
+    moved_bbox = di.get_bounding_box(output)
     assert moved_bbox.center[0] == pytest.approx(original_bbox.center[0], rel=1e-6)
     assert moved_bbox.center[1] == pytest.approx(
         original_bbox.center[1] + 50.0, rel=1e-6
@@ -2070,8 +2250,8 @@ def test_move_z(cube_geometry, tmp_path, backend):
         output=output,
         backend=backend,
     )
-    original_bbox = di.get_bounding_box_from_h5m(cube_geometry["filename"])
-    moved_bbox = di.get_bounding_box_from_h5m(output)
+    original_bbox = di.get_bounding_box(cube_geometry["filename"])
+    moved_bbox = di.get_bounding_box(output)
     assert moved_bbox.center[0] == pytest.approx(original_bbox.center[0], rel=1e-6)
     assert moved_bbox.center[1] == pytest.approx(original_bbox.center[1], rel=1e-6)
     assert moved_bbox.center[2] == pytest.approx(
@@ -2091,8 +2271,8 @@ def test_move_xyz(cube_geometry, tmp_path, backend):
         output=output,
         backend=backend,
     )
-    original_bbox = di.get_bounding_box_from_h5m(cube_geometry["filename"])
-    moved_bbox = di.get_bounding_box_from_h5m(output)
+    original_bbox = di.get_bounding_box(cube_geometry["filename"])
+    moved_bbox = di.get_bounding_box(output)
     assert moved_bbox.center[0] == pytest.approx(
         original_bbox.center[0] + 10.0, rel=1e-6
     )
@@ -2116,8 +2296,8 @@ def test_move_zero(cube_geometry, tmp_path, backend):
         output=output,
         backend=backend,
     )
-    original_bbox = di.get_bounding_box_from_h5m(cube_geometry["filename"])
-    moved_bbox = di.get_bounding_box_from_h5m(output)
+    original_bbox = di.get_bounding_box(cube_geometry["filename"])
+    moved_bbox = di.get_bounding_box(output)
     for i in range(3):
         assert moved_bbox.lower_left[i] == pytest.approx(
             original_bbox.lower_left[i], rel=1e-6
@@ -2137,8 +2317,8 @@ def test_move_materials_preserved(cube_geometry, tmp_path, backend):
         output=output,
         backend=backend,
     )
-    original_mats = di.get_materials_from_h5m(cube_geometry["filename"])
-    moved_mats = di.get_materials_from_h5m(output)
+    original_mats = di.get_materials(cube_geometry["filename"])
+    moved_mats = di.get_materials(output)
     assert original_mats == moved_mats
 
 
@@ -2179,7 +2359,7 @@ def test_move_openmc_transport(touching_boxes, backend, tmp_path):
     openmc.config["cross_sections"] = xs_xml
 
     # Create materials matching the DAGMC file
-    vol_mat = di.get_volumes_and_materials_from_h5m(output)
+    vol_mat = di.get_volumes_and_materials(output)
     mat_names = sorted(set(vol_mat.values()))
     openmc_mats = []
     for name in mat_names:
@@ -2194,13 +2374,12 @@ def test_move_openmc_transport(touching_boxes, backend, tmp_path):
     bound_dag_univ = dag_univ.bounded_universe()
     geometry = openmc.Geometry(root=bound_dag_univ)
 
-    # Point source near center of geometry
-    bb = di.get_bounding_box_from_h5m(output)
+    # Point source inside a known material volume
+    first_mat = mat_names[0]
+    bb = di.get_bounding_box(output, materials=first_mat)
     center = bb.center
     source = openmc.IndependentSource()
-    source.space = openmc.stats.Point(
-        (center[0] + 0.1, center[1] + 0.1, center[2] + 0.1)
-    )
+    source.space = openmc.stats.Point(center)
     source.angle = openmc.stats.Isotropic()
     source.energy = openmc.stats.Discrete([14e6], [1])
 
@@ -2269,19 +2448,19 @@ def test_combine_two_separate_cubes(tmp_path, backend):
     )
 
     # Check volumes
-    volumes = di.get_volumes_from_h5m(output)
+    volumes = di.get_volumes(output)
     assert volumes == [1, 2]
 
     # Check materials
-    materials = di.get_materials_from_h5m(output)
+    materials = di.get_materials(output)
     assert sorted(materials) == ["mat_a", "mat_b"]
 
     # Check volume-material mapping
-    vol_mat = di.get_volumes_and_materials_from_h5m(output, remove_prefix=True)
+    vol_mat = di.get_volumes_and_materials(output, remove_prefix=True)
     assert vol_mat == {1: "mat_a", 2: "mat_b"}
 
     # Combined bounding box should span both cubes
-    bbox = di.get_bounding_box_from_h5m(output)
+    bbox = di.get_bounding_box(output)
     np.testing.assert_allclose(bbox.lower_left, [-5.0, -5.0, -5.0], atol=0.1)
     np.testing.assert_allclose(bbox.upper_right, [35.0, 5.0, 5.0], atol=0.1)
 
@@ -2296,7 +2475,7 @@ def test_combine_preserves_volumes(cube_geometry, sphere_geometry, tmp_path, bac
         backend=backend,
     )
 
-    vol_by_id = di.get_volumes_from_h5m_by_cell_id(output)
+    vol_by_id = di.get_volumes_by_cell_id(output)
     # Volume 1 is the cube (1000), volume 2 is the sphere (4/3 * pi * 125)
     assert vol_by_id[1] == pytest.approx(1000.0, rel=0.05)
     assert vol_by_id[2] == pytest.approx(4 / 3 * np.pi * 125, rel=0.05)
@@ -2358,7 +2537,7 @@ def test_combine_openmc_transport(tmp_path, backend):
     openmc.config["cross_sections"] = xs_xml
 
     # Create materials matching the DAGMC file
-    vol_mat = di.get_volumes_and_materials_from_h5m(output)
+    vol_mat = di.get_volumes_and_materials(output)
     mat_names = sorted(set(vol_mat.values()))
     openmc_mats = []
     for name in mat_names:
@@ -2374,7 +2553,7 @@ def test_combine_openmc_transport(tmp_path, backend):
     geometry = openmc.Geometry(root=bound_dag_univ)
 
     # Point source near center of geometry
-    bb = di.get_bounding_box_from_h5m(output)
+    bb = di.get_bounding_box(output)
     center = bb.center
     source = openmc.IndependentSource()
     source.space = openmc.stats.Point(
