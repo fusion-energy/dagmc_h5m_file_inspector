@@ -2863,3 +2863,268 @@ def combine_h5m_files(
 
     _write_h5m(output_file, combined_vol_data, combined_vol_mat)
     return output_file
+
+
+def set_boundary_condition(
+    input_filename: str,
+    surface_id: int,
+    boundary_condition: str,
+    output_filename: Optional[str] = None,
+    backend: Literal["h5py", "pymoab"] = "h5py",
+) -> str:
+    """Set a boundary condition on a surface in a DAGMC h5m file.
+
+    DAGMC stores boundary conditions as Group entity sets with NAME tags
+    like ``"boundary:vacuum"`` that contain the target surface.  OpenMC
+    reads these tags to determine which surfaces are vacuum, reflective,
+    etc.
+
+    Arguments:
+        input_filename: path to the input DAGMC h5m file
+        surface_id: the GLOBAL_ID of the surface to modify
+        boundary_condition: the boundary condition string (e.g. ``"vacuum"``,
+            ``"reflective"``)
+        output_filename: path for the output h5m file.  If ``None``, the
+            input file is modified in place.
+        backend: the backend to use (currently only ``"h5py"`` is supported)
+
+    Returns:
+        The output filename.
+
+    Raises:
+        FileNotFoundError: If *input_filename* does not exist.
+        ValueError: If the surface ID is not found or the backend is invalid.
+
+    Example:
+        >>> import dagmc_h5m_file_inspector as di
+        >>> di.set_boundary_condition("dagmc.h5m", 3, "vacuum", "dagmc_bc.h5m")
+        'dagmc_bc.h5m'
+    """
+    _validate_backend(backend)
+    if not Path(input_filename).is_file():
+        raise FileNotFoundError(f"filename provided ({input_filename}) does not exist")
+
+    if output_filename is None:
+        output_filename = input_filename
+
+    if backend == "pymoab":
+        _check_pymoab_available()
+        return _set_boundary_condition_pymoab(
+            input_filename, surface_id, boundary_condition, output_filename
+        )
+    return _set_boundary_condition_h5py(
+        input_filename, surface_id, boundary_condition, output_filename
+    )
+
+
+def _set_boundary_condition_h5py(
+    input_filename: str,
+    surface_id: int,
+    boundary_condition: str,
+    output_filename: str,
+) -> str:
+    """Set a boundary condition on a surface using the h5py backend.
+
+    Copies the input file (if different from output) and adds a new Group
+    entity set named ``"boundary:<boundary_condition>"`` that contains the
+    target surface entity set.
+    """
+    import shutil
+
+    if input_filename != output_filename:
+        shutil.copy2(input_filename, output_filename)
+
+    with h5py.File(output_filename, "r+") as f:
+        sets_start_id = int(f["tstt/sets/list"].attrs["start_id"])
+
+        # --- Locate the surface entity handle for the given GLOBAL_ID ---
+        cat_ids = f["tstt/tags/CATEGORY/id_list"][()]
+        cat_vals = f["tstt/tags/CATEGORY/values"][()]
+
+        cat_lookup: Dict[int, str] = {}
+        for h, v in zip(cat_ids, cat_vals):
+            if hasattr(v, "tobytes"):
+                data = v.tobytes()
+            else:
+                data = bytes(v)
+            cat_lookup[int(h)] = data.split(b"\x00", 1)[0].decode("ascii")
+
+        # Build GLOBAL_ID mapping from both dense and sparse sources
+        global_ids: Dict[int, int] = {}
+        has_dense_gid = "tstt/sets/tags/GLOBAL_ID" in f
+        if has_dense_gid:
+            dense_gids = f["tstt/sets/tags/GLOBAL_ID"][()]
+            for idx, gid in enumerate(dense_gids):
+                global_ids[sets_start_id + idx] = int(gid)
+
+        if "tstt/tags/GLOBAL_ID" in f:
+            gid_tag = f["tstt/tags/GLOBAL_ID"]
+            if "id_list" in gid_tag and "values" in gid_tag:
+                for h, v in zip(gid_tag["id_list"][()], gid_tag["values"][()]):
+                    global_ids[int(h)] = int(v)
+
+        surface_handle = None
+        for handle, cat in cat_lookup.items():
+            if cat == "Surface" and global_ids.get(handle) == surface_id:
+                surface_handle = handle
+                break
+
+        if surface_handle is None:
+            available = sorted(
+                global_ids[h]
+                for h, c in cat_lookup.items()
+                if c == "Surface" and h in global_ids
+            )
+            raise ValueError(
+                f"Surface with GLOBAL_ID {surface_id} not found. "
+                f"Available surface IDs: {available}"
+            )
+
+        # --- Allocate a new entity set handle ---
+        max_id = int(f["tstt"].attrs["max_id"])
+        new_set_handle = max_id + 1
+
+        # --- Extend tstt/sets/contents ---
+        old_contents = f["tstt/sets/contents"][()]
+        new_contents = np.append(old_contents, np.uint64(surface_handle))
+        del f["tstt/sets/contents"]
+        f["tstt/sets"].create_dataset("contents", data=new_contents.astype(np.uint64))
+
+        # --- Extend tstt/sets/list ---
+        old_list = f["tstt/sets/list"][()]
+        last_row = old_list[-1]
+        new_row = np.array(
+            [[len(new_contents) - 1, int(last_row[1]), int(last_row[2]), 2]],
+            dtype=np.int64,
+        )
+        new_list = np.vstack([old_list, new_row])
+        del f["tstt/sets/list"]
+        ds = f["tstt/sets"].create_dataset("list", data=new_list)
+        ds.attrs.create("start_id", sets_start_id)
+
+        # --- Extend dense GLOBAL_ID for sets ---
+        if has_dense_gid:
+            old_dense = f["tstt/sets/tags/GLOBAL_ID"][()]
+            new_dense = np.append(old_dense, np.int32(-1))
+            del f["tstt/sets/tags/GLOBAL_ID"]
+            f["tstt/sets/tags"].create_dataset(
+                "GLOBAL_ID", data=new_dense.astype(np.int32)
+            )
+
+        # --- Extend CATEGORY tag with "Group" ---
+        new_cat_ids = np.append(cat_ids, np.uint64(new_set_handle))
+        group_bytes = b"Group" + b"\x00" * 27  # 32-byte padded
+        cat_dtype = cat_vals.dtype
+        if cat_dtype.kind == "S":
+            new_cat_entry = np.array([group_bytes], dtype=cat_dtype)
+        else:
+            new_cat_entry = np.frombuffer(group_bytes, dtype="V32")
+        new_cat_vals = np.concatenate([cat_vals, new_cat_entry])
+        del f["tstt/tags/CATEGORY/id_list"]
+        del f["tstt/tags/CATEGORY/values"]
+        f["tstt/tags/CATEGORY"].create_dataset(
+            "id_list", data=new_cat_ids.astype(np.uint64)
+        )
+        f["tstt/tags/CATEGORY"].create_dataset("values", data=new_cat_vals)
+
+        # --- Extend NAME tag with "boundary:<bc>" ---
+        name_str = f"boundary:{boundary_condition}"
+        name_bytes = name_str.encode("ascii").ljust(32, b"\x00")
+
+        if "tstt/tags/NAME/id_list" in f:
+            old_name_ids = f["tstt/tags/NAME/id_list"][()]
+            old_name_vals = f["tstt/tags/NAME/values"][()]
+            existing_dtype = old_name_vals.dtype
+
+            # Match the dtype of the existing values (S32 or V32)
+            if existing_dtype.kind == "S":
+                new_entry = np.array([name_bytes], dtype=existing_dtype)
+            else:
+                new_entry = np.frombuffer(name_bytes, dtype="V32")
+
+            new_name_ids = np.append(old_name_ids, np.uint64(new_set_handle))
+            new_name_vals = np.concatenate([old_name_vals, new_entry])
+            del f["tstt/tags/NAME/id_list"]
+            del f["tstt/tags/NAME/values"]
+            f["tstt/tags/NAME"].create_dataset(
+                "id_list", data=new_name_ids.astype(np.uint64)
+            )
+            f["tstt/tags/NAME"].create_dataset("values", data=new_name_vals)
+        else:
+            name_group = f["tstt/tags"].create_group("NAME")
+            name_group.attrs.create("class", 1, dtype=np.int32)
+            name_group.create_dataset(
+                "id_list",
+                data=np.array([new_set_handle], dtype=np.uint64),
+            )
+            name_group.create_dataset(
+                "values", data=np.array([name_bytes], dtype="V32")
+            )
+
+        # --- Update max_id ---
+        f["tstt"].attrs["max_id"] = np.uint64(new_set_handle)
+
+    return output_filename
+
+
+def _set_boundary_condition_pymoab(
+    input_filename: str,
+    surface_id: int,
+    boundary_condition: str,
+    output_filename: str,
+) -> str:
+    """Set a boundary condition on a surface using the pymoab backend.
+
+    Loads the h5m file, creates a new Group meshset named
+    ``"boundary:<boundary_condition>"`` containing the target surface,
+    and writes the result.
+    """
+    import shutil
+
+    from pymoab import core, types
+
+    if input_filename != output_filename:
+        shutil.copy2(input_filename, output_filename)
+
+    mbcore = core.Core()
+    mbcore.load_file(output_filename)
+
+    # Get tag handles
+    category_tag = mbcore.tag_get_handle(types.CATEGORY_TAG_NAME)
+    name_tag = mbcore.tag_get_handle(types.NAME_TAG_NAME)
+    id_tag = mbcore.tag_get_handle(types.GLOBAL_ID_TAG_NAME)
+
+    # Find the surface entity handle matching surface_id
+    surface_ents = mbcore.get_entities_by_type_and_tag(
+        0, types.MBENTITYSET, category_tag, ["Surface"]
+    )
+
+    surface_handle = None
+    for surf_ent in surface_ents:
+        surf_gid = mbcore.tag_get_data(id_tag, surf_ent)[0][0].item()
+        if surf_gid == surface_id:
+            surface_handle = surf_ent
+            break
+
+    if surface_handle is None:
+        available = sorted(
+            mbcore.tag_get_data(id_tag, s)[0][0].item() for s in surface_ents
+        )
+        raise ValueError(
+            f"Surface with GLOBAL_ID {surface_id} not found. "
+            f"Available surface IDs: {available}"
+        )
+
+    # Create a new Group meshset
+    new_group = mbcore.create_meshset()
+
+    # Tag it as a Group with the boundary name
+    mbcore.tag_set_data(category_tag, new_group, "Group")
+    bc_name = f"boundary:{boundary_condition}"
+    mbcore.tag_set_data(name_tag, new_group, bc_name)
+
+    # Add the surface entity set to the group
+    mbcore.add_entities(new_group, [surface_handle])
+
+    mbcore.write_file(output_filename)
+    return output_filename
