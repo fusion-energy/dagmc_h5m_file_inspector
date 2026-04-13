@@ -382,6 +382,32 @@ di.move(
 )
 ```
 
+## Setting boundary conditions on surfaces
+
+Set a boundary condition (e.g. vacuum, reflective) on a DAGMC surface.
+This creates a Group entity in the h5m file that OpenMC reads to apply
+the boundary condition during transport.
+
+```python
+import dagmc_h5m_file_inspector as di
+
+# Find surface IDs and their areas
+areas = di.get_surface_area_by_surface_id("dagmc.h5m")
+
+>>> {1: 50.0, 2: 80.0}
+
+# Set the larger surface to vacuum (e.g. outer surface of a shell)
+di.set_boundary_condition(
+    input_filename="dagmc.h5m",
+    surface_id=2,
+    boundary_condition="vacuum",
+    output_filename="dagmc_with_bc.h5m",
+)
+```
+
+Supported boundary conditions: `"vacuum"`, `"reflective"`.
+If `output_filename` is omitted the input file is modified in place.
+
 ## Combining multiple DAGMC h5m files
 
 Merge multiple DAGMC h5m files into a single file. Volumes are renumbered
