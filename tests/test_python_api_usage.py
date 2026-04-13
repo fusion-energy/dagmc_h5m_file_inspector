@@ -2159,13 +2159,12 @@ def test_rotate_around_axis_openmc_transport(touching_boxes, backend, tmp_path):
     bound_dag_univ = dag_univ.bounded_universe()
     geometry = openmc.Geometry(root=bound_dag_univ)
 
-    # Point source near center of geometry
-    bb = di.get_bounding_box(output)
+    # Point source inside a known material volume
+    first_mat = mat_names[0]
+    bb = di.get_bounding_box(output, materials=first_mat)
     center = bb.center
     source = openmc.IndependentSource()
-    source.space = openmc.stats.Point(
-        (center[0] + 0.1, center[1] + 0.1, center[2] + 0.1)
-    )
+    source.space = openmc.stats.Point(center)
     source.angle = openmc.stats.Isotropic()
     source.energy = openmc.stats.Discrete([14e6], [1])
 
@@ -2375,13 +2374,12 @@ def test_move_openmc_transport(touching_boxes, backend, tmp_path):
     bound_dag_univ = dag_univ.bounded_universe()
     geometry = openmc.Geometry(root=bound_dag_univ)
 
-    # Point source near center of geometry
-    bb = di.get_bounding_box(output)
+    # Point source inside a known material volume
+    first_mat = mat_names[0]
+    bb = di.get_bounding_box(output, materials=first_mat)
     center = bb.center
     source = openmc.IndependentSource()
-    source.space = openmc.stats.Point(
-        (center[0] + 0.1, center[1] + 0.1, center[2] + 0.1)
-    )
+    source.space = openmc.stats.Point(center)
     source.angle = openmc.stats.Isotropic()
     source.energy = openmc.stats.Discrete([14e6], [1])
 
