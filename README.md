@@ -31,7 +31,7 @@ as an alternative backend if installed.
 ```python
 import dagmc_h5m_file_inspector as di
 
-di.get_volumes_from_h5m("dagmc.h5m")
+di.get_volumes("dagmc.h5m")
 
 >>> [1, 2]
 ```
@@ -41,7 +41,7 @@ di.get_volumes_from_h5m("dagmc.h5m")
 ```python
 import dagmc_h5m_file_inspector as di
 
-di.get_materials_from_h5m("dagmc.h5m")
+di.get_materials("dagmc.h5m")
 
 >>> ['big_box', 'small_box']
 ```
@@ -51,7 +51,7 @@ di.get_materials_from_h5m("dagmc.h5m")
 ```python
 import dagmc_h5m_file_inspector as di
 
-di.get_volumes_and_materials_from_h5m("dagmc.h5m")
+di.get_volumes_and_materials("dagmc.h5m")
 
 >>> {1: 'small_box', 2: 'big_box'}
 ```
@@ -61,9 +61,29 @@ di.get_volumes_and_materials_from_h5m("dagmc.h5m")
 ```python
 import dagmc_h5m_file_inspector as di
 
-di.get_surfaces_from_h5m("dagmc.h5m")
+di.get_surface_ids("dagmc.h5m")
 
 >>> [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+```
+
+## Finding surface IDs by cell ID
+
+```python
+import dagmc_h5m_file_inspector as di
+
+di.get_surface_ids_by_cell_id("dagmc.h5m", cell_id=1)
+
+>>> [1, 2, 3, 4, 5, 6]
+```
+
+## Finding surface IDs by material name
+
+```python
+import dagmc_h5m_file_inspector as di
+
+di.get_surface_ids_by_material_name("dagmc.h5m", material="small_box")
+
+>>> [1, 2, 3, 4, 5, 6]
 ```
 
 ## Getting the bounding box
@@ -73,7 +93,7 @@ Returns a `BoundingBox` object that is API compatible with OpenMC's `openmc.Boun
 ```python
 import dagmc_h5m_file_inspector as di
 
-bbox = di.get_bounding_box_from_h5m("dagmc.h5m")
+bbox = di.get_bounding_box("dagmc.h5m")
 
 >>> bbox
 BoundingBox((-5.0, -10.0, -10.0), (25.0, 10.0, 10.0))
@@ -122,7 +142,7 @@ Optionally filter by material tag to get the bounding box for specific materials
 import dagmc_h5m_file_inspector as di
 
 # Bounding box for a single material
-bbox = di.get_bounding_box_from_h5m("dagmc.h5m", materials="small_box")
+bbox = di.get_bounding_box("dagmc.h5m", materials="small_box")
 
 >>> bbox.lower_left
 (-5.0, -5.0, -5.0)
@@ -131,7 +151,7 @@ bbox = di.get_bounding_box_from_h5m("dagmc.h5m", materials="small_box")
 (5.0, 5.0, 5.0)
 
 # Bounding box for multiple materials (combined)
-bbox = di.get_bounding_box_from_h5m("dagmc.h5m", materials=["small_box", "big_box"])
+bbox = di.get_bounding_box("dagmc.h5m", materials=["small_box", "big_box"])
 
 >>> bbox.lower_left
 (-5.0, -10.0, -10.0)
@@ -145,7 +165,7 @@ bbox = di.get_bounding_box_from_h5m("dagmc.h5m", materials=["small_box", "big_bo
 ```python
 import dagmc_h5m_file_inspector as di
 
-di.get_volumes_from_h5m_by_cell_id("dagmc.h5m")
+di.get_volumes_by_cell_id("dagmc.h5m")
 
 >>> {1: 1000.0, 2: 8000.0}
 ```
@@ -155,7 +175,7 @@ di.get_volumes_from_h5m_by_cell_id("dagmc.h5m")
 ```python
 import dagmc_h5m_file_inspector as di
 
-di.get_volumes_from_h5m_by_material_name("dagmc.h5m")
+di.get_volumes_by_material_name("dagmc.h5m")
 
 >>> {'small_box': 1000.0, 'big_box': 8000.0}
 ```
@@ -165,7 +185,7 @@ di.get_volumes_from_h5m_by_material_name("dagmc.h5m")
 ```python
 import dagmc_h5m_file_inspector as di
 
-di.get_volumes_from_h5m_by_cell_id_and_material_name("dagmc.h5m")
+di.get_volumes_by_cell_id_and_material_name("dagmc.h5m")
 
 >>> {(1, 'small_box'): 1000.0, (2, 'big_box'): 8000.0}
 ```
@@ -193,6 +213,20 @@ import dagmc_h5m_file_inspector as di
 di.get_surface_area_by_material_name("dagmc.h5m", material="small_box")
 
 >>> [100.0, 100.0, 100.0, 100.0, 100.0, 100.0]
+```
+
+## Getting surface areas by surface ID
+
+Returns a dictionary mapping each surface ID to its area. Useful for
+computing wall loading when combined with surface current tallies.
+
+```python
+import dagmc_h5m_file_inspector as di
+
+di.get_surface_area_by_surface_id("dagmc.h5m")
+
+>>> {1: 100.0, 2: 100.0, 3: 100.0, 4: 100.0, 5: 100.0, 6: 100.0,
+     7: 100.0, 8: 400.0, 9: 400.0, 10: 400.0, 11: 400.0, 12: 400.0}
 ```
 
 ## Getting surface shared status
@@ -227,7 +261,7 @@ big_box = openmc.Material(name='big_box')
 materials = openmc.Materials([small_box, big_box])
 
 # Set volumes from DAGMC geometry
-di.set_openmc_material_volumes_from_h5m(materials, "dagmc.h5m")
+di.set_openmc_material_volumes(materials, "dagmc.h5m")
 
 >>> small_box.volume
 1000.0
@@ -282,18 +316,18 @@ writing the result to a new file.
 ```python
 import dagmc_h5m_file_inspector as di
 
-di.get_materials_from_h5m("dagmc.h5m")
+di.get_materials("dagmc.h5m")
 
 >>> ['big_box', 'small_box']
 
 # Remove a single material
-di.remove_materials_from_h5m(
+di.remove_materials(
     input_filename="dagmc.h5m",
     output_filename="dagmc_reduced.h5m",
     materials_to_remove="small_box",
 )
 
-di.get_materials_from_h5m("dagmc_reduced.h5m")
+di.get_materials("dagmc_reduced.h5m")
 
 >>> ['big_box']
 ```
@@ -301,18 +335,18 @@ di.get_materials_from_h5m("dagmc_reduced.h5m")
 ```python
 import dagmc_h5m_file_inspector as di
 
-di.get_materials_from_h5m("reactor.h5m")
+di.get_materials("reactor.h5m")
 
 >>> ['blanket', 'first_wall', 'shield']
 
 # Remove multiple materials
-di.remove_materials_from_h5m(
+di.remove_materials(
     input_filename="reactor.h5m",
     output_filename="reactor_reduced.h5m",
     materials_to_remove=["blanket", "shield"],
 )
 
-di.get_materials_from_h5m("reactor_reduced.h5m")
+di.get_materials("reactor_reduced.h5m")
 
 >>> ['first_wall']
 ```
@@ -362,11 +396,11 @@ di.combine_h5m_files(
     output_file="combined.h5m",
 )
 
-di.get_volumes_from_h5m("combined.h5m")
+di.get_volumes("combined.h5m")
 
 >>> [1, 2]
 
-di.get_materials_from_h5m("combined.h5m")
+di.get_materials("combined.h5m")
 
 >>> ['mat_a', 'mat_b']
 ```
@@ -379,7 +413,7 @@ but `"pymoab"` can be used if pymoab is installed:
 ```python
 import dagmc_h5m_file_inspector as di
 
-di.get_volumes_from_h5m("dagmc.h5m", backend="pymoab")
+di.get_volumes("dagmc.h5m", backend="pymoab")
 
 >>> [1, 2]
 ```

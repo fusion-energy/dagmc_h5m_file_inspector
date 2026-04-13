@@ -738,6 +738,61 @@ def _get_surface_areas_h5py(filename: str) -> Dict[int, List[float]]:
         return result
 
 
+def _get_surface_area_by_surface_id_h5py(filename: str) -> Dict[int, float]:
+    """Get surface area for each surface ID using h5py backend.
+
+    Returns a dictionary mapping surface IDs to their areas.
+    """
+    with h5py.File(filename, "r") as f:
+        coords, node_start = _read_nodes_h5py(f)
+        tri_conn, tri_start = _read_tri3_connectivity_h5py(f)
+        tri_conn0 = tri_conn - node_start
+        tri_end = tri_start + tri_conn.shape[0] - 1
+
+        sets = _read_sets_h5py(f)
+        sets_by_handle = {s.handle: s for s in sets}
+
+        categories = _read_tag_h5py(f, "CATEGORY")
+        geom_dim = _read_tag_h5py(f, "GEOM_DIMENSION")
+
+        global_ids: Dict[int, int] = {}
+        sets_start_id = int(f["tstt/sets/list"].attrs["start_id"])
+        if "tstt/sets/tags/GLOBAL_ID" in f:
+            dense_gids = f["tstt/sets/tags/GLOBAL_ID"][...]
+            for idx, gid in enumerate(dense_gids):
+                handle = sets_start_id + idx
+                global_ids[handle] = int(gid)
+        else:
+            global_ids = _read_tag_h5py(f, "GLOBAL_ID")
+
+        surface_handles = {h for h, cat in categories.items() if cat == "Surface"}
+        surface_handles.update(h for h, dim in geom_dim.items() if dim == 2)
+
+        result: Dict[int, float] = {}
+        for surf_handle in surface_handles:
+            surf_gid = global_ids.get(surf_handle)
+            if surf_gid is None:
+                continue
+
+            surf_set = sets_by_handle.get(surf_handle)
+            if surf_set is None:
+                continue
+
+            tri_indices = _tri_indices_for_set(
+                surf_set,
+                tri_start=tri_start,
+                tri_end=tri_end,
+            )
+            if tri_indices.size == 0:
+                continue
+
+            result[int(surf_gid)] = _surface_area_from_tris(
+                coords, tri_conn0, tri_indices
+            )
+
+        return result
+
+
 def _get_surface_shared_status_h5py(
     filename: str,
 ) -> Dict[int, Dict[str, list]]:
@@ -1468,7 +1523,7 @@ def _remove_materials_h5py(
     materials_to_remove: List[str],
 ) -> List[str]:
     """Remove materials using h5py backend (read-filter-write approach)."""
-    vol_mat = get_volumes_and_materials_from_h5m(
+    vol_mat = get_volumes_and_materials(
         filename=input_filename, remove_prefix=True, backend="h5py"
     )
     all_materials = sorted(set(vol_mat.values()))
@@ -1509,7 +1564,7 @@ def _remove_materials_pymoab(
     ``_write_h5m``.  This avoids issues with pymoab's ``write_file`` when
     all groups are removed.
     """
-    vol_mat = get_volumes_and_materials_from_h5m(
+    vol_mat = get_volumes_and_materials(
         filename=input_filename, remove_prefix=True, backend="pymoab"
     )
     all_materials = sorted(set(vol_mat.values()))
@@ -1748,6 +1803,56 @@ def _get_surface_areas_pymoab(filename: str) -> Dict[int, List[float]]:
     return result
 
 
+def _get_surface_area_by_surface_id_pymoab(filename: str) -> Dict[int, float]:
+    """Get surface area for each surface ID using pymoab backend.
+
+    Returns a dictionary mapping surface IDs to their areas.
+    """
+    import pymoab as mb
+
+    mbcore = _load_moab_file(filename)
+    category_tag = mbcore.tag_get_handle(mb.types.CATEGORY_TAG_NAME)
+    id_tag = mbcore.tag_get_handle(mb.types.GLOBAL_ID_TAG_NAME)
+
+    surface_ents = mbcore.get_entities_by_type_and_tag(
+        0, mb.types.MBENTITYSET, category_tag, ["Surface"]
+    )
+
+    result: Dict[int, float] = {}
+
+    for surf_ent in surface_ents:
+        surf_gid = mbcore.tag_get_data(id_tag, surf_ent)[0][0].item()
+        tris = mbcore.get_entities_by_type(surf_ent, mb.types.MBTRI)
+        if not tris:
+            continue
+
+        all_verts = set()
+        for tri in tris:
+            conn = mbcore.get_connectivity(tri)
+            all_verts.update(conn)
+
+        all_verts = list(all_verts)
+        vert_to_idx = {v: i for i, v in enumerate(all_verts)}
+
+        coords = mbcore.get_coords(all_verts).reshape(-1, 3)
+
+        tri_array = []
+        for tri in tris:
+            conn = mbcore.get_connectivity(tri)
+            tri_array.append([vert_to_idx[v] for v in conn])
+        tri_array = np.array(tri_array)
+
+        v0 = coords[tri_array[:, 0]]
+        v1 = coords[tri_array[:, 1]]
+        v2 = coords[tri_array[:, 2]]
+        edge1 = v1 - v0
+        edge2 = v2 - v0
+        area = float(0.5 * np.linalg.norm(np.cross(edge1, edge2), axis=1).sum())
+        result[surf_gid] = area
+
+    return result
+
+
 def _get_surface_shared_status_pymoab(
     filename: str,
 ) -> Dict[int, Dict[str, list]]:
@@ -1813,7 +1918,7 @@ def _get_surface_shared_status_pymoab(
 # ============================================================================
 
 
-def get_volumes_from_h5m(
+def get_volumes(
     filename: str,
     backend: Literal["h5py", "pymoab"] = "h5py",
 ) -> List[int]:
@@ -1836,7 +1941,7 @@ def get_volumes_from_h5m(
     return _get_volumes_h5py(filename)
 
 
-def get_surfaces_from_h5m(
+def get_surface_ids(
     filename: str,
     backend: Literal["h5py", "pymoab"] = "h5py",
 ) -> List[int]:
@@ -1859,7 +1964,7 @@ def get_surfaces_from_h5m(
     return _get_surfaces_h5py(filename)
 
 
-def get_materials_from_h5m(
+def get_materials(
     filename: str,
     remove_prefix: Optional[bool] = True,
     backend: Literal["h5py", "pymoab"] = "h5py",
@@ -1884,7 +1989,7 @@ def get_materials_from_h5m(
     return _get_materials_h5py(filename, remove_prefix)
 
 
-def get_volumes_and_materials_from_h5m(
+def get_volumes_and_materials(
     filename: str,
     remove_prefix: Optional[bool] = True,
     backend: Literal["h5py", "pymoab"] = "h5py",
@@ -1910,7 +2015,7 @@ def get_volumes_and_materials_from_h5m(
     return _get_volumes_and_materials_h5py(filename, remove_prefix)
 
 
-def get_bounding_box_from_h5m(
+def get_bounding_box(
     filename: str,
     materials: Optional[Union[str, List[str]]] = None,
     backend: Literal["h5py", "pymoab"] = "h5py",
@@ -1942,7 +2047,7 @@ def get_bounding_box_from_h5m(
     if isinstance(materials, str):
         materials = [materials]
 
-    vol_mat_mapping = get_volumes_and_materials_from_h5m(
+    vol_mat_mapping = get_volumes_and_materials(
         filename=filename,
         remove_prefix=True,
         backend=backend,
@@ -1977,7 +2082,7 @@ def get_bounding_box_from_h5m(
     return BoundingBox(lower_left, upper_right)
 
 
-def get_volumes_from_h5m_by_cell_id(
+def get_volumes_by_cell_id(
     filename: str,
     backend: Literal["h5py", "pymoab"] = "h5py",
 ) -> Dict[int, float]:
@@ -2001,7 +2106,7 @@ def get_volumes_from_h5m_by_cell_id(
     return _get_volumes_sizes_h5py(filename)
 
 
-def get_volumes_from_h5m_by_material_name(
+def get_volumes_by_material_name(
     filename: str,
     backend: Literal["h5py", "pymoab"] = "h5py",
 ) -> Dict[str, float]:
@@ -2021,12 +2126,12 @@ def get_volumes_from_h5m_by_material_name(
         raise FileNotFoundError(f"filename provided ({filename}) does not exist")
 
     # Get volume-to-material mapping and volume sizes
-    vol_mat_mapping = get_volumes_and_materials_from_h5m(
+    vol_mat_mapping = get_volumes_and_materials(
         filename=filename,
         remove_prefix=True,
         backend=backend,
     )
-    volume_sizes = get_volumes_from_h5m_by_cell_id(
+    volume_sizes = get_volumes_by_cell_id(
         filename=filename,
         backend=backend,
     )
@@ -2041,7 +2146,7 @@ def get_volumes_from_h5m_by_material_name(
     return material_volumes
 
 
-def get_volumes_from_h5m_by_cell_id_and_material_name(
+def get_volumes_by_cell_id_and_material_name(
     filename: str,
     backend: Literal["h5py", "pymoab"] = "h5py",
 ) -> Dict[Tuple[int, str], float]:
@@ -2060,12 +2165,12 @@ def get_volumes_from_h5m_by_cell_id_and_material_name(
         raise FileNotFoundError(f"filename provided ({filename}) does not exist")
 
     # Get volume-to-material mapping and volume sizes
-    vol_mat_mapping = get_volumes_and_materials_from_h5m(
+    vol_mat_mapping = get_volumes_and_materials(
         filename=filename,
         remove_prefix=True,
         backend=backend,
     )
-    volume_sizes = get_volumes_from_h5m_by_cell_id(
+    volume_sizes = get_volumes_by_cell_id(
         filename=filename,
         backend=backend,
     )
@@ -2131,7 +2236,7 @@ def get_surface_area_by_material_name(
     if not Path(filename).is_file():
         raise FileNotFoundError(f"filename provided ({filename}) does not exist")
 
-    vol_mat_mapping = get_volumes_and_materials_from_h5m(
+    vol_mat_mapping = get_volumes_and_materials(
         filename=filename,
         remove_prefix=True,
         backend=backend,
@@ -2161,6 +2266,94 @@ def get_surface_area_by_material_name(
     return combined
 
 
+def get_surface_area_by_surface_id(
+    filename: str,
+    backend: Literal["h5py", "pymoab"] = "h5py",
+) -> Dict[int, float]:
+    """Returns the surface area of each DAGMC surface keyed by surface ID.
+
+    Arguments:
+        filename: the filename of the DAGMC h5m file
+        backend: the backend to use for reading the file ("h5py" or "pymoab")
+
+    Returns:
+        A dictionary mapping surface IDs to their areas.
+    """
+    _validate_backend(backend)
+    if not Path(filename).is_file():
+        raise FileNotFoundError(f"filename provided ({filename}) does not exist")
+
+    if backend == "pymoab":
+        _check_pymoab_available()
+        return _get_surface_area_by_surface_id_pymoab(filename)
+    return _get_surface_area_by_surface_id_h5py(filename)
+
+
+def get_surface_ids_by_cell_id(
+    filename: str,
+    cell_id: int,
+    backend: Literal["h5py", "pymoab"] = "h5py",
+) -> List[int]:
+    """Returns the surface IDs that bound a given volume (cell) ID.
+
+    Arguments:
+        filename: the filename of the DAGMC h5m file
+        cell_id: the DAGMC volume (cell) ID
+        backend: the backend to use for reading the file ("h5py" or "pymoab")
+
+    Returns:
+        A sorted list of surface IDs bounding the volume.
+    """
+    shared = get_surface_shared_status(filename=filename, backend=backend)
+
+    surface_ids = [
+        surf_id for surf_id, info in shared.items() if cell_id in info["cell_ids"]
+    ]
+
+    if not surface_ids:
+        available = sorted(
+            {cid for info in shared.values() for cid in info["cell_ids"]}
+        )
+        raise ValueError(
+            f"cell_id {cell_id} not found. Available cell IDs: {available}"
+        )
+
+    return sorted(surface_ids)
+
+
+def get_surface_ids_by_material_name(
+    filename: str,
+    material: str,
+    backend: Literal["h5py", "pymoab"] = "h5py",
+) -> List[int]:
+    """Returns the surface IDs that bound volumes with the given material name.
+
+    Arguments:
+        filename: the filename of the DAGMC h5m file
+        material: the material tag name (without 'mat:' prefix)
+        backend: the backend to use for reading the file ("h5py" or "pymoab")
+
+    Returns:
+        A sorted list of surface IDs bounding volumes with the given material.
+    """
+    shared = get_surface_shared_status(filename=filename, backend=backend)
+
+    surface_ids = [
+        surf_id for surf_id, info in shared.items() if material in info["materials"]
+    ]
+
+    if not surface_ids:
+        available = sorted(
+            {mat for info in shared.values() for mat in info["materials"]}
+        )
+        raise ValueError(
+            f"No surfaces found for material {material!r}. "
+            f"Available materials: {available}"
+        )
+
+    return sorted(surface_ids)
+
+
 def get_surface_shared_status(
     filename: str,
     backend: Literal["h5py", "pymoab"] = "h5py",
@@ -2186,7 +2379,7 @@ def get_surface_shared_status(
     return _get_surface_shared_status_h5py(filename)
 
 
-def set_openmc_material_volumes_from_h5m(
+def set_openmc_material_volumes(
     materials: Union[List, object],
     filename: str,
     backend: Literal["h5py", "pymoab"] = "h5py",
@@ -2216,7 +2409,7 @@ def set_openmc_material_volumes_from_h5m(
         >>> steel = openmc.Material(name='steel')
         >>> water = openmc.Material(name='water')
         >>> materials = openmc.Materials([steel, water])
-        >>> set_openmc_material_volumes_from_h5m(materials, 'dagmc.h5m')
+        >>> set_openmc_material_volumes(materials, 'dagmc.h5m')
         >>> print(steel.volume)  # Volume is now set
     """
     _validate_backend(backend)
@@ -2237,7 +2430,7 @@ def set_openmc_material_volumes_from_h5m(
         seen_names[name] = True
 
     # Get volumes aggregated by material name
-    material_volumes = get_volumes_from_h5m_by_material_name(
+    material_volumes = get_volumes_by_material_name(
         filename=filename,
         backend=backend,
     )
@@ -2281,7 +2474,7 @@ def convert_h5m_to_vtkhdf(
     )
 
     # Get volume-to-material mapping
-    vol_mat = get_volumes_and_materials_from_h5m(
+    vol_mat = get_volumes_and_materials(
         filename=h5m_filename, remove_prefix=True, backend=backend
     )
 
@@ -2426,7 +2619,7 @@ def get_triangle_conn_and_coords_by_volume(
     return _get_triangle_conn_and_coords_h5py(filename)
 
 
-def remove_materials_from_h5m(
+def remove_materials(
     input_filename: str,
     output_filename: str,
     materials_to_remove: Union[str, List[str]],
@@ -2441,7 +2634,7 @@ def remove_materials_from_h5m(
         output_filename: path for the output h5m file
         materials_to_remove: material name or list of material names to remove
             (without the ``mat:`` prefix, matching the convention of
-            ``get_materials_from_h5m(remove_prefix=True)``)
+            ``get_materials(remove_prefix=True)``)
         backend: the backend to use ("h5py" or "pymoab")
 
     Returns:
@@ -2542,7 +2735,7 @@ def rotate_around_axis(
     if backend == "pymoab":
         _check_pymoab_available()
 
-    vol_mat = get_volumes_and_materials_from_h5m(
+    vol_mat = get_volumes_and_materials(
         filename=filename, remove_prefix=True, backend=backend
     )
     vol_data = get_triangle_conn_and_coords_by_volume(
@@ -2595,7 +2788,7 @@ def move(
     if backend == "pymoab":
         _check_pymoab_available()
 
-    vol_mat = get_volumes_and_materials_from_h5m(
+    vol_mat = get_volumes_and_materials(
         filename=filename, remove_prefix=True, backend=backend
     )
     vol_data = get_triangle_conn_and_coords_by_volume(
@@ -2656,7 +2849,7 @@ def combine_h5m_files(
     next_vol_id = 1
 
     for filepath in input_files:
-        vol_mat = get_volumes_and_materials_from_h5m(
+        vol_mat = get_volumes_and_materials(
             filename=filepath, remove_prefix=True, backend=backend
         )
         vol_data = get_triangle_conn_and_coords_by_volume(
