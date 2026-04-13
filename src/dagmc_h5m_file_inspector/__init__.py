@@ -24,6 +24,7 @@ from .core import (
     move,
     remove_materials,
     rotate_around_axis,
+    set_boundary_condition,
     set_openmc_material_volumes,
 )
 
@@ -49,5 +50,6 @@ __all__ = [
     "move",
     "remove_materials",
     "rotate_around_axis",
+    "set_boundary_condition",
     "set_openmc_material_volumes",
 ]

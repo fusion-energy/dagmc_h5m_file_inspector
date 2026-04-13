@@ -2589,3 +2589,86 @@ def test_combine_openmc_transport(tmp_path, backend):
         assert flux > 0
     finally:
         os.chdir(original_dir)
+
+
+# ============================================================================
+# Tests for set_boundary_condition
+# ============================================================================
+
+
+def test_set_boundary_condition_vacuum(touching_boxes, tmp_path):
+    """Setting a vacuum boundary condition creates a Group with the correct NAME."""
+    output = str(tmp_path / "bc_vacuum.h5m")
+    surface_ids = di.get_surface_ids(touching_boxes["filename"])
+    target_id = surface_ids[0]
+
+    result = di.set_boundary_condition(
+        touching_boxes["filename"], target_id, "vacuum", output
+    )
+    assert result == output
+
+    # Verify the boundary group was written
+    with h5py.File(output, "r") as f:
+        name_ids = f["tstt/tags/NAME/id_list"][()]
+        name_vals = f["tstt/tags/NAME/values"][()]
+        names = {}
+        for h, v in zip(name_ids, name_vals):
+            data = v.tobytes() if hasattr(v, "tobytes") else bytes(v)
+            names[int(h)] = data.split(b"\x00", 1)[0].decode("ascii")
+        assert "boundary:vacuum" in names.values()
+
+    # Geometry should still be intact
+    assert di.get_surface_ids(output) == surface_ids
+    assert di.get_volumes(output) == di.get_volumes(touching_boxes["filename"])
+
+
+def test_set_boundary_condition_reflective(touching_boxes, tmp_path):
+    """Setting a reflective boundary condition also works."""
+    output = str(tmp_path / "bc_reflect.h5m")
+    surface_ids = di.get_surface_ids(touching_boxes["filename"])
+
+    di.set_boundary_condition(
+        touching_boxes["filename"], surface_ids[-1], "reflective", output
+    )
+
+    with h5py.File(output, "r") as f:
+        name_ids = f["tstt/tags/NAME/id_list"][()]
+        name_vals = f["tstt/tags/NAME/values"][()]
+        names = []
+        for h, v in zip(name_ids, name_vals):
+            data = v.tobytes() if hasattr(v, "tobytes") else bytes(v)
+            names.append(data.split(b"\x00", 1)[0].decode("ascii"))
+        assert "boundary:reflective" in names
+
+
+def test_set_boundary_condition_invalid_surface(touching_boxes, tmp_path):
+    """Requesting a non-existent surface ID raises ValueError."""
+    output = str(tmp_path / "bc_bad.h5m")
+    with pytest.raises(ValueError, match="not found"):
+        di.set_boundary_condition(touching_boxes["filename"], 9999, "vacuum", output)
+
+
+def test_set_boundary_condition_file_not_found():
+    """A missing input file raises FileNotFoundError."""
+    with pytest.raises(FileNotFoundError):
+        di.set_boundary_condition("nonexistent.h5m", 1, "vacuum", "/tmp/out.h5m")
+
+
+def test_set_boundary_condition_in_place(touching_boxes, tmp_path):
+    """Passing output_filename=None modifies the file in place."""
+    import shutil
+
+    copy_path = str(tmp_path / "inplace.h5m")
+    shutil.copy2(touching_boxes["filename"], copy_path)
+
+    surface_ids = di.get_surface_ids(copy_path)
+    di.set_boundary_condition(copy_path, surface_ids[0], "vacuum")
+
+    with h5py.File(copy_path, "r") as f:
+        name_ids = f["tstt/tags/NAME/id_list"][()]
+        name_vals = f["tstt/tags/NAME/values"][()]
+        names = []
+        for h, v in zip(name_ids, name_vals):
+            data = v.tobytes() if hasattr(v, "tobytes") else bytes(v)
+            names.append(data.split(b"\x00", 1)[0].decode("ascii"))
+        assert "boundary:vacuum" in names
