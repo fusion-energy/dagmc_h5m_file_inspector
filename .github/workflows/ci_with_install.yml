@@ -44,6 +44,8 @@ jobs:
 
       - name: install package
         run: |
+          python -m venv venv
+          source venv/bin/activate
           python -m pip install --extra-index-url https://shimwell.github.io/wheels moab
           python -m pip install --extra-index-url https://shimwell.github.io/wheels openmc
           pip install git+https://github.com/svalinn/pydagmc
@@ -51,6 +53,7 @@ jobs:
 
       - name: Run test_utils
         run: |
+          source venv/bin/activate
           python -m pytest
 
       - name: Upload to codecov
