@@ -12,17 +12,6 @@ def test_version():
     assert len(di.__version__) > 0
 
 
-# Check if openmc is available
-try:
-    import openmc  # noqa: F401
-
-    HAS_OPENMC = True
-except ImportError:
-    HAS_OPENMC = False
-
-requires_openmc = pytest.mark.skipif(not HAS_OPENMC, reason="openmc not installed")
-
-
 # ============================================================================
 # Tests for touching boxes geometry
 # ============================================================================
@@ -68,6 +57,156 @@ def test_volume_extraction(touching_boxes, backend):
     )
 
     assert volumes == touching_boxes["volumes"]
+
+
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+def test_surface_extraction(touching_boxes, backend):
+    """Extracts the surface ids from a dagmc file and checks that
+    surface ids are returned as a sorted list of integers"""
+
+    surfaces = di.get_surfaces_from_h5m(
+        filename=touching_boxes["filename"],
+        backend=backend,
+    )
+
+    assert isinstance(surfaces, list)
+    assert len(surfaces) > 0
+    assert all(isinstance(s, int) for s in surfaces)
+    assert surfaces == sorted(surfaces)
+    # two cuboids: 6 surfaces each = 12 surface meshsets
+    assert len(surfaces) == 12
+
+
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+def test_surface_extraction_separated_boxes(separated_boxes, backend):
+    """Extracts the surface ids from separated boxes and checks that
+    surface ids are returned correctly"""
+
+    surfaces = di.get_surfaces_from_h5m(
+        filename=separated_boxes["filename"],
+        backend=backend,
+    )
+
+    assert isinstance(surfaces, list)
+    assert len(surfaces) > 0
+    assert all(isinstance(s, int) for s in surfaces)
+    assert surfaces == sorted(surfaces)
+    # two cuboids: 6 surfaces each = 12 surface meshsets
+    assert len(surfaces) == 12
+
+
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+def test_surface_extraction_cube(cube_geometry, backend):
+    """A cube should have 6 surfaces"""
+
+    surfaces = di.get_surfaces_from_h5m(
+        filename=cube_geometry["filename"],
+        backend=backend,
+    )
+
+    assert len(surfaces) == cube_geometry["expected_num_surfaces"]
+
+
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+def test_surface_extraction_cylinder(cylinder_geometry, backend):
+    """A cylinder should have 3 surfaces (top cap, bottom cap, lateral)"""
+
+    surfaces = di.get_surfaces_from_h5m(
+        filename=cylinder_geometry["filename"],
+        backend=backend,
+    )
+
+    assert len(surfaces) == cylinder_geometry["expected_num_surfaces"]
+
+
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+def test_surface_extraction_file_not_found(backend):
+    """Checks that a FileNotFoundError is raised for missing files"""
+
+    with pytest.raises(FileNotFoundError):
+        di.get_surfaces_from_h5m(
+            filename="non_existant.h5m",
+            backend=backend,
+        )
+
+
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+def test_surface_filter_openmc_transport(touching_boxes, backend, tmp_path):
+    """Verify that surface IDs from get_surfaces_from_h5m can be used in an
+    OpenMC SurfaceFilter tally with DAGMC geometry."""
+    import openmc
+
+    filename = touching_boxes["filename"]
+
+    # Get surface IDs using the inspector
+    surface_ids = di.get_surfaces_from_h5m(filename=filename, backend=backend)
+    assert len(surface_ids) > 0
+
+    # Set up cross sections (H1 only)
+    xs_path = os.path.join(os.path.dirname(__file__), "ENDFB-7.1-NNDC_H1.h5")
+    xs_xml = str(tmp_path / "cross_sections.xml")
+    with open(xs_xml, "w") as fh:
+        fh.write(
+            '<?xml version="1.0" encoding="UTF-8"?>\n'
+            "<cross_sections>\n"
+            f'  <library materials="H1" path="{xs_path}" type="neutron"/>\n'
+            "</cross_sections>\n"
+        )
+    openmc.config["cross_sections"] = xs_xml
+
+    # Create materials matching the DAGMC file
+    mat1 = openmc.Material(name="small_box")
+    mat1.add_nuclide("H1", 1.0, "ao")
+    mat1.set_density("g/cm3", 0.001)
+    mat2 = openmc.Material(name="big_box")
+    mat2.add_nuclide("H1", 1.0, "ao")
+    mat2.set_density("g/cm3", 0.001)
+    materials = openmc.Materials([mat1, mat2])
+
+    # DAGMC geometry
+    dag_univ = openmc.DAGMCUniverse(filename=filename)
+    bound_dag_univ = dag_univ.bounded_universe()
+    geometry = openmc.Geometry(root=bound_dag_univ)
+
+    # Point source near center of small_box
+    source = openmc.IndependentSource()
+    source.space = openmc.stats.Point((0.1, 0.1, 0.1))
+    source.angle = openmc.stats.Isotropic()
+    source.energy = openmc.stats.Discrete([14e6], [1])
+
+    settings = openmc.Settings()
+    settings.batches = 2
+    settings.particles = 1000
+    settings.inactive = 0
+    settings.run_mode = "fixed source"
+    settings.source = source
+
+    # Create a surface filter tally using the discovered surface IDs
+    surface_filter = openmc.SurfaceFilter(surface_ids)
+    tally = openmc.Tally(name="surface_current")
+    tally.filters = [surface_filter]
+    tally.scores = ["current"]
+
+    model = openmc.Model(
+        materials=materials,
+        geometry=geometry,
+        settings=settings,
+        tallies=openmc.Tallies([tally]),
+    )
+
+    original_dir = os.getcwd()
+    os.chdir(tmp_path)
+    try:
+        output_file = model.run(output=False)
+        sp = openmc.StatePoint(output_file)
+        tally_result = sp.get_tally(name="surface_current")
+        current = tally_result.mean.flatten()
+        # At least some surfaces should have non-zero current
+        assert current.sum() > 0
+        # The tally should have one bin per surface
+        assert len(current) == len(surface_ids)
+    finally:
+        os.chdir(original_dir)
 
 
 @pytest.mark.parametrize("backend", ["h5py", "pymoab"])
@@ -489,6 +628,18 @@ def test_volume_ids_h5py_pymoab_consistency(filename):
 
 
 @pytest.mark.parametrize("filename", H5M_TEST_FILES)
+def test_surface_ids_h5py_pymoab_consistency(filename):
+    """Verify h5py and pymoab backends return the same surface IDs"""
+
+    h5py_surfaces = di.get_surfaces_from_h5m(filename, backend="h5py")
+    pymoab_surfaces = di.get_surfaces_from_h5m(filename, backend="pymoab")
+
+    assert h5py_surfaces == pymoab_surfaces, (
+        f"Surface IDs differ: h5py={h5py_surfaces}, pymoab={pymoab_surfaces}"
+    )
+
+
+@pytest.mark.parametrize("filename", H5M_TEST_FILES)
 def test_material_tags_h5py_pymoab_consistency(filename):
     """Verify h5py and pymoab backends return the same material tags"""
 
@@ -583,7 +734,6 @@ def test_volume_sizes_by_material_h5py_pymoab_consistency(filename):
 # ============================================================================
 
 
-@requires_openmc
 @pytest.mark.parametrize("backend", ["h5py", "pymoab"])
 def test_set_openmc_material_volumes_with_list(touching_boxes, backend):
     """Tests setting volumes on a list of OpenMC materials"""
@@ -612,7 +762,6 @@ def test_set_openmc_material_volumes_with_list(touching_boxes, backend):
     assert abs(big_box_mat.volume - expected[2]) / expected[2] < 0.05
 
 
-@requires_openmc
 @pytest.mark.parametrize("backend", ["h5py", "pymoab"])
 def test_set_openmc_material_volumes_with_materials_object(touching_boxes, backend):
     """Tests setting volumes on an OpenMC Materials collection"""
@@ -636,7 +785,6 @@ def test_set_openmc_material_volumes_with_materials_object(touching_boxes, backe
     assert abs(big_box_mat.volume - expected[2]) / expected[2] < 0.05
 
 
-@requires_openmc
 @pytest.mark.parametrize("backend", ["h5py", "pymoab"])
 def test_set_openmc_material_volumes_non_matching_materials(touching_boxes, backend):
     """Tests that materials without matching names are not affected"""
@@ -662,7 +810,6 @@ def test_set_openmc_material_volumes_non_matching_materials(touching_boxes, back
     assert unmatched_mat.volume is None
 
 
-@requires_openmc
 @pytest.mark.parametrize("backend", ["h5py", "pymoab"])
 def test_set_openmc_material_volumes_duplicate_names_error(touching_boxes, backend):
     """Tests that duplicate material names raise an error"""
@@ -684,7 +831,6 @@ def test_set_openmc_material_volumes_duplicate_names_error(touching_boxes, backe
         )
 
 
-@requires_openmc
 @pytest.mark.parametrize("backend", ["h5py", "pymoab"])
 def test_set_openmc_material_volumes_file_not_found(backend):
     """Tests that missing file raises FileNotFoundError"""
@@ -701,7 +847,6 @@ def test_set_openmc_material_volumes_file_not_found(backend):
         )
 
 
-@requires_openmc
 @pytest.mark.parametrize("backend", ["h5py", "pymoab"])
 def test_set_openmc_material_volumes_with_none_names(touching_boxes, backend):
     """Tests that materials with None names are ignored without error"""
@@ -741,7 +886,6 @@ H5M_TEST_FILES_OPENMC_STOCHASTIC = [
 ]
 
 
-@requires_openmc
 @pytest.mark.parametrize("filename", H5M_TEST_FILES_OPENMC_STOCHASTIC)
 def test_volume_sizes_openmc_stochastic_consistency(filename, tmp_path):
     """Verify our volume calculations match OpenMC stochastic results.
@@ -1339,7 +1483,6 @@ def test_output_readable_by_both_backends(separated_boxes, tmp_path):
     assert mats_via_pymoab2 == ["box_b"]
 
 
-@requires_openmc
 @pytest.mark.parametrize("backend", ["h5py", "pymoab"])
 def test_remove_material_openmc_transport(touching_boxes, backend, tmp_path):
     """Verify that the h5m file produced by remove_materials_from_h5m is a
@@ -1791,7 +1934,6 @@ def test_rotate_around_axis_file_not_found(backend):
         di.rotate_around_axis(filename="nonexistent.h5m", backend=backend)
 
 
-@requires_openmc
 @pytest.mark.parametrize("backend", ["h5py", "pymoab"])
 def test_rotate_around_axis_openmc_transport(touching_boxes, backend, tmp_path):
     """Verify that a rotated h5m file is a valid DAGMC geometry by running
@@ -2007,7 +2149,6 @@ def test_move_file_not_found(backend):
         di.move(filename="nonexistent.h5m", backend=backend)
 
 
-@requires_openmc
 @pytest.mark.parametrize("backend", ["h5py", "pymoab"])
 def test_move_openmc_transport(touching_boxes, backend, tmp_path):
     """Verify that a moved h5m file is a valid DAGMC geometry by running
@@ -2102,7 +2243,6 @@ def test_combine_two_separate_cubes(tmp_path, backend):
     """Combine two separate single-cube h5m files and verify volumes, materials,
     and bounding box of the result."""
     import cadquery as cq
-
     from cad_to_dagmc import CadToDagmc
 
     # Create cube A at origin
@@ -2174,14 +2314,12 @@ def test_combine_file_not_found():
         di.combine_h5m_files(input_files=["does_not_exist.h5m"], output_file="out.h5m")
 
 
-@requires_openmc
 @pytest.mark.parametrize("backend", ["h5py", "pymoab"])
 def test_combine_openmc_transport(tmp_path, backend):
     """Verify that a combined h5m file is a valid DAGMC geometry by running
     OpenMC fixed-source particle transport through it."""
     import cadquery as cq
     import openmc
-
     from cad_to_dagmc import CadToDagmc
 
     # Create cube A at origin

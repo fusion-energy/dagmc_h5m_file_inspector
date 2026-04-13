@@ -1,7 +1,6 @@
 import cadquery as cq
 import numpy as np
 import pytest
-
 from cad_to_dagmc import CadToDagmc
 
 
