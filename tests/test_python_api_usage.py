@@ -2248,7 +2248,6 @@ def test_combine_two_separate_cubes(tmp_path, backend):
     """Combine two separate single-cube h5m files and verify volumes, materials,
     and bounding box of the result."""
     import cadquery as cq
-
     from cad_to_dagmc import CadToDagmc
 
     # Create cube A at origin
@@ -2326,7 +2325,6 @@ def test_combine_openmc_transport(tmp_path, backend):
     OpenMC fixed-source particle transport through it."""
     import cadquery as cq
     import openmc
-
     from cad_to_dagmc import CadToDagmc
 
     # Create cube A at origin
