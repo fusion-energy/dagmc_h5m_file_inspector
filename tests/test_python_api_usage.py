@@ -134,8 +134,6 @@ def test_surface_extraction_file_not_found(backend):
 def test_surface_filter_openmc_transport(touching_boxes, backend, tmp_path):
     """Verify that surface IDs from get_surfaces_from_h5m can be used in an
     OpenMC SurfaceFilter tally with DAGMC geometry."""
-    import sys
-
     import openmc
 
     filename = touching_boxes["filename"]
@@ -196,13 +194,10 @@ def test_surface_filter_openmc_transport(touching_boxes, backend, tmp_path):
         tallies=openmc.Tallies([tally]),
     )
 
-    # Use the openmc executable from the same environment as the Python interpreter
-    openmc_exec = os.path.join(os.path.dirname(sys.executable), "openmc")
-
     original_dir = os.getcwd()
     os.chdir(tmp_path)
     try:
-        output_file = model.run(output=False, openmc_exec=openmc_exec)
+        output_file = model.run(output=False)
         sp = openmc.StatePoint(output_file)
         tally_result = sp.get_tally(name="surface_current")
         current = tally_result.mean.flatten()
