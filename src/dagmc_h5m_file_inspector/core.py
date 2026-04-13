@@ -237,6 +237,28 @@ def _get_volumes_h5py(filename: str) -> List[int]:
         return sorted(set(volume_ids))
 
 
+def _get_surfaces_h5py(filename: str) -> List[int]:
+    """Get surface IDs using h5py backend."""
+    with h5py.File(filename, "r") as f:
+        global_ids = f["tstt/sets/tags/GLOBAL_ID"][()]
+        cat_ids = f["tstt/tags/CATEGORY/id_list"][()]
+        cat_vals = f["tstt/tags/CATEGORY/values"][()]
+
+        cat_lookup = {}
+        for eid, val in zip(cat_ids, cat_vals):
+            cat_lookup[int(eid)] = val.tobytes().decode("ascii").rstrip("\x00")
+
+        start_id = int(f["tstt/sets/list"].attrs["start_id"])
+
+        surface_ids = []
+        for i in range(len(global_ids)):
+            entity_id = start_id + i
+            if cat_lookup.get(entity_id) == "Surface":
+                surface_ids.append(int(global_ids[i]))
+
+        return sorted(set(surface_ids))
+
+
 def _get_materials_h5py(filename: str, remove_prefix: bool) -> List[str]:
     """Get material names using h5py backend."""
     with h5py.File(filename, "r") as f:
@@ -899,6 +921,26 @@ def _get_volumes_pymoab(filename: str) -> List[int]:
                 ids.append(id.item())
 
     return sorted(set(list(ids)))
+
+
+def _get_surfaces_pymoab(filename: str) -> List[int]:
+    """Get surface IDs using pymoab backend."""
+    import pymoab as mb
+
+    mbcore = _load_moab_file(filename)
+    category_tag = mbcore.tag_get_handle(mb.types.CATEGORY_TAG_NAME)
+    id_tag = mbcore.tag_get_handle(mb.types.GLOBAL_ID_TAG_NAME)
+
+    surface_ents = mbcore.get_entities_by_type_and_tag(
+        0, mb.types.MBENTITYSET, category_tag, ["Surface"]
+    )
+
+    ids = []
+    for surf_ent in surface_ents:
+        surf_id = mbcore.tag_get_data(id_tag, surf_ent)[0][0]
+        ids.append(surf_id.item())
+
+    return sorted(set(ids))
 
 
 def _get_materials_pymoab(filename: str, remove_prefix: bool) -> List[str]:
@@ -1792,6 +1834,29 @@ def get_volumes_from_h5m(
         _check_pymoab_available()
         return _get_volumes_pymoab(filename)
     return _get_volumes_h5py(filename)
+
+
+def get_surfaces_from_h5m(
+    filename: str,
+    backend: Literal["h5py", "pymoab"] = "h5py",
+) -> List[int]:
+    """Reads in a DAGMC h5m file and finds the surface ids.
+
+    Arguments:
+        filename: the filename of the DAGMC h5m file
+        backend: the backend to use for reading the file ("h5py" or "pymoab")
+
+    Returns:
+        A list of surface ids
+    """
+    _validate_backend(backend)
+    if not Path(filename).is_file():
+        raise FileNotFoundError(f"filename provided ({filename}) does not exist")
+
+    if backend == "pymoab":
+        _check_pymoab_available()
+        return _get_surfaces_pymoab(filename)
+    return _get_surfaces_h5py(filename)
 
 
 def get_materials_from_h5m(
