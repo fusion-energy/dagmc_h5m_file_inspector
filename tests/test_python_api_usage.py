@@ -2596,79 +2596,80 @@ def test_combine_openmc_transport(tmp_path, backend):
 # ============================================================================
 
 
-def test_set_boundary_condition_vacuum(touching_boxes, tmp_path):
+def _read_name_tags(filename):
+    """Helper to read NAME tags from an h5m file and return as a list of strings."""
+    with h5py.File(filename, "r") as f:
+        name_ids = f["tstt/tags/NAME/id_list"][()]
+        name_vals = f["tstt/tags/NAME/values"][()]
+        names = []
+        for _h, v in zip(name_ids, name_vals):
+            data = v.tobytes() if hasattr(v, "tobytes") else bytes(v)
+            names.append(data.split(b"\x00", 1)[0].decode("ascii"))
+        return names
+
+
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+def test_set_boundary_condition_vacuum(touching_boxes, tmp_path, backend):
     """Setting a vacuum boundary condition creates a Group with the correct NAME."""
-    output = str(tmp_path / "bc_vacuum.h5m")
+    output = str(tmp_path / f"bc_vacuum_{backend}.h5m")
     surface_ids = di.get_surface_ids(touching_boxes["filename"])
     target_id = surface_ids[0]
 
     result = di.set_boundary_condition(
-        touching_boxes["filename"], target_id, "vacuum", output
+        touching_boxes["filename"], target_id, "vacuum", output, backend=backend
     )
     assert result == output
-
-    # Verify the boundary group was written
-    with h5py.File(output, "r") as f:
-        name_ids = f["tstt/tags/NAME/id_list"][()]
-        name_vals = f["tstt/tags/NAME/values"][()]
-        names = {}
-        for h, v in zip(name_ids, name_vals):
-            data = v.tobytes() if hasattr(v, "tobytes") else bytes(v)
-            names[int(h)] = data.split(b"\x00", 1)[0].decode("ascii")
-        assert "boundary:vacuum" in names.values()
+    assert "boundary:vacuum" in _read_name_tags(output)
 
     # Geometry should still be intact
     assert di.get_surface_ids(output) == surface_ids
     assert di.get_volumes(output) == di.get_volumes(touching_boxes["filename"])
 
 
-def test_set_boundary_condition_reflective(touching_boxes, tmp_path):
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+def test_set_boundary_condition_reflective(touching_boxes, tmp_path, backend):
     """Setting a reflective boundary condition also works."""
-    output = str(tmp_path / "bc_reflect.h5m")
+    output = str(tmp_path / f"bc_reflect_{backend}.h5m")
     surface_ids = di.get_surface_ids(touching_boxes["filename"])
 
     di.set_boundary_condition(
-        touching_boxes["filename"], surface_ids[-1], "reflective", output
+        touching_boxes["filename"],
+        surface_ids[-1],
+        "reflective",
+        output,
+        backend=backend,
     )
-
-    with h5py.File(output, "r") as f:
-        name_ids = f["tstt/tags/NAME/id_list"][()]
-        name_vals = f["tstt/tags/NAME/values"][()]
-        names = []
-        for h, v in zip(name_ids, name_vals):
-            data = v.tobytes() if hasattr(v, "tobytes") else bytes(v)
-            names.append(data.split(b"\x00", 1)[0].decode("ascii"))
-        assert "boundary:reflective" in names
+    assert "boundary:reflective" in _read_name_tags(output)
 
 
-def test_set_boundary_condition_invalid_surface(touching_boxes, tmp_path):
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+def test_set_boundary_condition_invalid_surface(touching_boxes, tmp_path, backend):
     """Requesting a non-existent surface ID raises ValueError."""
-    output = str(tmp_path / "bc_bad.h5m")
+    output = str(tmp_path / f"bc_bad_{backend}.h5m")
     with pytest.raises(ValueError, match="not found"):
-        di.set_boundary_condition(touching_boxes["filename"], 9999, "vacuum", output)
+        di.set_boundary_condition(
+            touching_boxes["filename"], 9999, "vacuum", output, backend=backend
+        )
 
 
-def test_set_boundary_condition_file_not_found():
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+def test_set_boundary_condition_file_not_found(backend):
     """A missing input file raises FileNotFoundError."""
     with pytest.raises(FileNotFoundError):
-        di.set_boundary_condition("nonexistent.h5m", 1, "vacuum", "/tmp/out.h5m")
+        di.set_boundary_condition(
+            "nonexistent.h5m", 1, "vacuum", "/tmp/out.h5m", backend=backend
+        )
 
 
-def test_set_boundary_condition_in_place(touching_boxes, tmp_path):
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+def test_set_boundary_condition_in_place(touching_boxes, tmp_path, backend):
     """Passing output_filename=None modifies the file in place."""
     import shutil
 
-    copy_path = str(tmp_path / "inplace.h5m")
+    copy_path = str(tmp_path / f"inplace_{backend}.h5m")
     shutil.copy2(touching_boxes["filename"], copy_path)
 
     surface_ids = di.get_surface_ids(copy_path)
-    di.set_boundary_condition(copy_path, surface_ids[0], "vacuum")
+    di.set_boundary_condition(copy_path, surface_ids[0], "vacuum", backend=backend)
 
-    with h5py.File(copy_path, "r") as f:
-        name_ids = f["tstt/tags/NAME/id_list"][()]
-        name_vals = f["tstt/tags/NAME/values"][()]
-        names = []
-        for h, v in zip(name_ids, name_vals):
-            data = v.tobytes() if hasattr(v, "tobytes") else bytes(v)
-            names.append(data.split(b"\x00", 1)[0].decode("ascii"))
-        assert "boundary:vacuum" in names
+    assert "boundary:vacuum" in _read_name_tags(copy_path)

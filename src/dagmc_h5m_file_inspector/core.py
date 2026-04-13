@@ -2903,14 +2903,15 @@ def set_boundary_condition(
     _validate_backend(backend)
     if not Path(input_filename).is_file():
         raise FileNotFoundError(f"filename provided ({input_filename}) does not exist")
-    if backend == "pymoab":
-        raise NotImplementedError(
-            "set_boundary_condition is only supported with the h5py backend"
-        )
 
     if output_filename is None:
         output_filename = input_filename
 
+    if backend == "pymoab":
+        _check_pymoab_available()
+        return _set_boundary_condition_pymoab(
+            input_filename, surface_id, boundary_condition, output_filename
+        )
     return _set_boundary_condition_h5py(
         input_filename, surface_id, boundary_condition, output_filename
     )
@@ -3063,4 +3064,67 @@ def _set_boundary_condition_h5py(
         # --- Update max_id ---
         f["tstt"].attrs["max_id"] = np.uint64(new_set_handle)
 
+    return output_filename
+
+
+def _set_boundary_condition_pymoab(
+    input_filename: str,
+    surface_id: int,
+    boundary_condition: str,
+    output_filename: str,
+) -> str:
+    """Set a boundary condition on a surface using the pymoab backend.
+
+    Loads the h5m file, creates a new Group meshset named
+    ``"boundary:<boundary_condition>"`` containing the target surface,
+    and writes the result.
+    """
+    import shutil
+
+    from pymoab import core, types
+
+    if input_filename != output_filename:
+        shutil.copy2(input_filename, output_filename)
+
+    mbcore = core.Core()
+    mbcore.load_file(output_filename)
+
+    # Get tag handles
+    category_tag = mbcore.tag_get_handle(types.CATEGORY_TAG_NAME)
+    name_tag = mbcore.tag_get_handle(types.NAME_TAG_NAME)
+    id_tag = mbcore.tag_get_handle(types.GLOBAL_ID_TAG_NAME)
+
+    # Find the surface entity handle matching surface_id
+    surface_ents = mbcore.get_entities_by_type_and_tag(
+        0, types.MBENTITYSET, category_tag, ["Surface"]
+    )
+
+    surface_handle = None
+    for surf_ent in surface_ents:
+        surf_gid = mbcore.tag_get_data(id_tag, surf_ent)[0][0].item()
+        if surf_gid == surface_id:
+            surface_handle = surf_ent
+            break
+
+    if surface_handle is None:
+        available = sorted(
+            mbcore.tag_get_data(id_tag, s)[0][0].item() for s in surface_ents
+        )
+        raise ValueError(
+            f"Surface with GLOBAL_ID {surface_id} not found. "
+            f"Available surface IDs: {available}"
+        )
+
+    # Create a new Group meshset
+    new_group = mbcore.create_meshset()
+
+    # Tag it as a Group with the boundary name
+    mbcore.tag_set_data(category_tag, new_group, "Group")
+    bc_name = f"boundary:{boundary_condition}"
+    mbcore.tag_set_data(name_tag, new_group, bc_name)
+
+    # Add the surface entity set to the group
+    mbcore.add_entities(new_group, [surface_handle])
+
+    mbcore.write_file(output_filename)
     return output_filename
