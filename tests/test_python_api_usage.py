@@ -1285,6 +1285,28 @@ def test_convert_h5m_to_vtkhdf_cell_data(touching_boxes, tmp_path):
                 assert np.all(material_ids[mask] == expected_mat_id)
 
 
+def test_convert_h5m_to_vtkhdf_material_names_ascii(touching_boxes, tmp_path):
+    """material_names must be stored as ASCII strings.
+
+    VTK's VTKHDF reader (e.g. VTK 9.6) cannot convert UTF-8 string datasets and
+    fails to open the file with an H5Dread "no appropriate function for
+    conversion path" error. ASCII variable-length strings read correctly, so we
+    pin the charset to guard against a regression to the default UTF-8 encoding.
+    """
+
+    output_file = str(tmp_path / "output.vtkhdf")
+    di.convert_h5m_to_vtkhdf(
+        h5m_filename=touching_boxes["filename"],
+        vtkhdf_filename=output_file,
+    )
+
+    with h5py.File(output_file, "r") as f:
+        dt = f["VTKHDF/FieldData/material_names"].dtype
+        string_info = h5py.check_string_dtype(dt)
+        assert string_info is not None, "material_names is not a string dataset"
+        assert string_info.encoding == "ascii"
+
+
 def test_convert_h5m_to_vtkhdf_default_filename(touching_boxes, tmp_path):
     """Test that omitting vtkhdf_filename produces correct default"""
 
