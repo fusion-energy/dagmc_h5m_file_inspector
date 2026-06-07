@@ -2576,7 +2576,11 @@ def _write_vtkhdf(
         cell_data.create_dataset("material_id", data=material_ids.astype(np.int32))
 
         field_data = root.create_group("FieldData")
-        dt = h5py.string_dtype()
+        # Use ASCII (not the default UTF-8) variable-length strings. VTK's VTKHDF
+        # reader (e.g. VTK 9.6) cannot convert UTF-8 string datasets and raises
+        # "no appropriate function for conversion path" / H5Dread errors when the
+        # file is opened, whereas ASCII variable-length strings read correctly.
+        dt = h5py.string_dtype("ascii")
         field_data.create_dataset("material_names", data=material_names, dtype=dt)
 
 
