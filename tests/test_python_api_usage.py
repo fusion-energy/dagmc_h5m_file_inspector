@@ -2695,3 +2695,101 @@ def test_set_boundary_condition_in_place(touching_boxes, tmp_path, backend):
     di.set_boundary_condition(copy_path, surface_ids[0], "vacuum", backend=backend)
 
     assert "boundary:vacuum" in _read_name_tags(copy_path)
+
+
+# ============================================================================
+# Tests for non-material group readers
+# ============================================================================
+
+
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+def test_get_cell_ids_by_group_name(grouped_boxes, backend):
+    """Non-material groups are returned keyed by group name with their cell
+    ids, and material groups are excluded."""
+
+    result = di.get_cell_ids_by_group_name(
+        filename=grouped_boxes["filename"],
+        backend=backend,
+    )
+
+    assert result == grouped_boxes["cell_ids_by_group_name"]
+
+
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+def test_get_cell_ids_by_group_name_excludes_materials(grouped_boxes, backend):
+    """No material (mat:) group should appear in the result."""
+
+    result = di.get_cell_ids_by_group_name(
+        filename=grouped_boxes["filename"],
+        backend=backend,
+    )
+
+    assert all(not name.startswith("mat:") for name in result)
+
+
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+def test_get_groups_by_cell_id(grouped_boxes, backend):
+    """The inverse mapping returns the sorted group names for each cell id."""
+
+    result = di.get_groups_by_cell_id(
+        filename=grouped_boxes["filename"],
+        backend=backend,
+    )
+
+    assert result == grouped_boxes["groups_by_cell_id"]
+
+
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+def test_group_readers_agree_between_backends(grouped_boxes, backend):
+    """The two readers are exact inverses of each other."""
+
+    cell_ids_by_group = di.get_cell_ids_by_group_name(
+        filename=grouped_boxes["filename"],
+        backend=backend,
+    )
+    groups_by_cell = di.get_groups_by_cell_id(
+        filename=grouped_boxes["filename"],
+        backend=backend,
+    )
+
+    rebuilt = {}
+    for group_name, cell_ids in cell_ids_by_group.items():
+        for cell_id in cell_ids:
+            rebuilt.setdefault(cell_id, []).append(group_name)
+    rebuilt = {cid: sorted(names) for cid, names in rebuilt.items()}
+
+    assert groups_by_cell == rebuilt
+
+
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+def test_get_cell_ids_by_group_name_no_groups(touching_boxes, backend):
+    """A file with only material groups returns an empty mapping."""
+
+    result = di.get_cell_ids_by_group_name(
+        filename=touching_boxes["filename"],
+        backend=backend,
+    )
+
+    assert result == {}
+
+
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+def test_get_cell_ids_by_group_name_file_not_found(backend):
+    """A missing input file raises FileNotFoundError."""
+    with pytest.raises(FileNotFoundError):
+        di.get_cell_ids_by_group_name("nonexistent.h5m", backend=backend)
+
+
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+def test_get_groups_by_cell_id_file_not_found(backend):
+    """A missing input file raises FileNotFoundError."""
+    with pytest.raises(FileNotFoundError):
+        di.get_groups_by_cell_id("nonexistent.h5m", backend=backend)
+
+
+def test_get_cell_ids_by_group_name_invalid_backend(grouped_boxes):
+    """An invalid backend raises ValueError."""
+    with pytest.raises(ValueError):
+        di.get_cell_ids_by_group_name(
+            grouped_boxes["filename"], backend="not_a_backend"
+        )
