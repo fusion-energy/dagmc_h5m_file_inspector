@@ -56,6 +56,44 @@ di.get_volumes_and_materials("dagmc.h5m")
 >>> {1: 'small_box', 2: 'big_box'}
 ```
 
+## Finding cell IDs by group name
+
+Besides the ``mat:`` material groups, a DAGMC h5m file can contain other groups
+(for example ``component:`` groups tagging individual components). These readers
+surface that non-material group membership so you can map groups onto cell
+(volume) IDs, which is handy for building an ``openmc.CellFilter``. Material
+(``mat:``) groups are excluded as they are already available via
+``get_volumes_and_materials``.
+
+```python
+import dagmc_h5m_file_inspector as di
+
+di.get_cell_ids_by_group_name("dagmc.h5m")
+
+>>> {'component:small_box': [1], 'component:big_box': [2], 'assembly:all': [1, 2]}
+```
+
+The inverse mapping (cell ID to the groups it belongs to) is also available:
+
+```python
+import dagmc_h5m_file_inspector as di
+
+di.get_groups_by_cell_id("dagmc.h5m")
+
+>>> {1: ['assembly:all', 'component:small_box'], 2: ['assembly:all', 'component:big_box']}
+```
+
+These can be combined with OpenMC to tally on a component rather than duplicating
+material definitions:
+
+```python
+import openmc
+import dagmc_h5m_file_inspector as di
+
+cell_ids = di.get_cell_ids_by_group_name("dagmc.h5m")["component:small_box"]
+cell_filter = openmc.CellFilter(cell_ids)
+```
+
 ## Finding surface IDs
 
 ```python

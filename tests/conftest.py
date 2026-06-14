@@ -220,3 +220,69 @@ def rectangle_geometry(tmp_path_factory):
     """Fixture providing the rectangle geometry."""
     tmp_path = tmp_path_factory.mktemp("rectangle")
     return create_rectangle_geometry(tmp_path)
+
+
+def create_grouped_boxes(tmp_path):
+    """Create two touching boxes and add non-material groups.
+
+    Builds on the touching boxes geometry (which already has ``mat:`` groups)
+    and uses pymoab to add extra non-material groups so the file contains group
+    membership beyond the material tags:
+
+    - ``component:small_box`` -> cell 1
+    - ``component:big_box`` -> cell 2
+    - ``assembly:all`` -> cells 1 and 2
+
+    Cell 1 is the small_box (mat:small_box) and cell 2 is the big_box
+    (mat:big_box), matching the touching boxes geometry.
+    """
+    from pymoab import core, types
+
+    base = create_touching_boxes(tmp_path)
+    filename = base["filename"]
+
+    mbcore = core.Core()
+    mbcore.load_file(filename)
+
+    category_tag = mbcore.tag_get_handle(types.CATEGORY_TAG_NAME)
+    name_tag = mbcore.tag_get_handle(types.NAME_TAG_NAME)
+    id_tag = mbcore.tag_get_handle(types.GLOBAL_ID_TAG_NAME)
+
+    volume_ents = mbcore.get_entities_by_type_and_tag(
+        0, types.MBENTITYSET, category_tag, ["Volume"]
+    )
+    volume_by_cell_id = {}
+    for vol in volume_ents:
+        cell_id = mbcore.tag_get_data(id_tag, vol)[0][0].item()
+        volume_by_cell_id[cell_id] = vol
+
+    def add_group(name, cell_ids):
+        group_set = mbcore.create_meshset()
+        mbcore.tag_set_data(category_tag, group_set, "Group")
+        mbcore.tag_set_data(name_tag, group_set, name)
+        for cell_id in cell_ids:
+            mbcore.add_entity(group_set, volume_by_cell_id[cell_id])
+
+    add_group("component:small_box", [1])
+    add_group("component:big_box", [2])
+    add_group("assembly:all", [1, 2])
+
+    mbcore.write_file(filename)
+
+    base["cell_ids_by_group_name"] = {
+        "component:small_box": [1],
+        "component:big_box": [2],
+        "assembly:all": [1, 2],
+    }
+    base["groups_by_cell_id"] = {
+        1: ["assembly:all", "component:small_box"],
+        2: ["assembly:all", "component:big_box"],
+    }
+    return base
+
+
+@pytest.fixture(scope="session")
+def grouped_boxes(tmp_path_factory):
+    """Fixture providing two boxes with extra non-material groups."""
+    tmp_path = tmp_path_factory.mktemp("grouped")
+    return create_grouped_boxes(tmp_path)

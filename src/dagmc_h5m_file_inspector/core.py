@@ -324,6 +324,54 @@ def _get_volumes_and_materials_h5py(
         return vol_mat
 
 
+def _get_cell_ids_by_group_name_h5py(filename: str) -> Dict[str, List[int]]:
+    """Get non-material group membership keyed by group name using h5py backend.
+
+    Returns a dictionary mapping each non ``mat:`` group name to the sorted
+    list of cell (volume) GLOBAL_IDs that belong to it.
+    """
+    with h5py.File(filename, "r") as f:
+        sets = _read_sets_h5py(f)
+        categories = _read_tag_h5py(f, "CATEGORY")
+        names = _read_tag_h5py(f, "NAME")
+
+        global_ids: Dict[int, int] = {}
+        sets_start_id = int(f["tstt/sets/list"].attrs["start_id"])
+        if "tstt/sets/tags/GLOBAL_ID" in f:
+            dense_gids = f["tstt/sets/tags/GLOBAL_ID"][...]
+            for idx, gid in enumerate(dense_gids):
+                global_ids[sets_start_id + idx] = int(gid)
+        else:
+            global_ids = _read_tag_h5py(f, "GLOBAL_ID")
+
+        geom_dim = _read_tag_h5py(f, "GEOM_DIMENSION")
+        volume_handles = {h for h, cat in categories.items() if cat == "Volume"}
+        volume_handles.update(h for h, dim in geom_dim.items() if dim == 3)
+
+        result: Dict[str, List[int]] = {}
+        for set_info in sets:
+            if categories.get(set_info.handle) != "Group":
+                continue
+            name = names.get(set_info.handle, "")
+            if not name or name.startswith("mat:"):
+                continue
+            cell_ids = sorted(
+                {
+                    global_ids[h]
+                    for h in _expand_set_contents(set_info)
+                    if h in volume_handles and h in global_ids
+                }
+            )
+            if not cell_ids:
+                continue
+            existing = result.setdefault(name, [])
+            for cid in cell_ids:
+                if cid not in existing:
+                    existing.append(cid)
+
+        return {name: sorted(ids) for name, ids in result.items()}
+
+
 def _get_bounding_box_h5py(filename: str) -> BoundingBox:
     """Get bounding box using h5py backend."""
     with h5py.File(filename, "r") as f:
@@ -1042,6 +1090,43 @@ def _get_volumes_and_materials_pymoab(
                     vol_mat[id] = group_name
 
     return vol_mat
+
+
+def _get_cell_ids_by_group_name_pymoab(filename: str) -> Dict[str, List[int]]:
+    """Get non-material group membership keyed by group name using pymoab.
+
+    Returns a dictionary mapping each non ``mat:`` group name to the sorted
+    list of cell (volume) GLOBAL_IDs that belong to it.
+    """
+    import pymoab as mb
+
+    mbcore = _load_moab_file(filename)
+    group_ents = _get_groups_pymoab(mbcore)
+    name_tag = mbcore.tag_get_handle(mb.types.NAME_TAG_NAME)
+    id_tag = mbcore.tag_get_handle(mb.types.GLOBAL_ID_TAG_NAME)
+    category_tag = mbcore.tag_get_handle(mb.types.CATEGORY_TAG_NAME)
+
+    result: Dict[str, List[int]] = {}
+    for group_ent in group_ents:
+        group_name = mbcore.tag_get_data(name_tag, group_ent)[0][0]
+        if group_name.startswith("mat:"):
+            continue
+
+        cell_ids = []
+        for ent in mbcore.get_entities_by_type(group_ent, mb.types.MBENTITYSET):
+            if mbcore.tag_get_data(category_tag, ent)[0][0] != "Volume":
+                continue
+            cell_ids.append(mbcore.tag_get_data(id_tag, ent)[0][0].item())
+
+        cell_ids = sorted(set(cell_ids))
+        if not cell_ids:
+            continue
+        existing = result.setdefault(group_name, [])
+        for cid in cell_ids:
+            if cid not in existing:
+                existing.append(cid)
+
+    return {name: sorted(ids) for name, ids in result.items()}
 
 
 def _get_bounding_box_pymoab(filename: str) -> BoundingBox:
@@ -2013,6 +2098,69 @@ def get_volumes_and_materials(
         _check_pymoab_available()
         return _get_volumes_and_materials_pymoab(filename, remove_prefix)
     return _get_volumes_and_materials_h5py(filename, remove_prefix)
+
+
+def get_cell_ids_by_group_name(
+    filename: str,
+    backend: Literal["h5py", "pymoab"] = "h5py",
+) -> Dict[str, List[int]]:
+    """Reads in a DAGMC h5m file and finds the non-material groups along with
+    the cell (volume) ids that belong to each one.
+
+    Material groups (those tagged with a ``mat:`` prefix) are excluded as they
+    are already available via ``get_volumes_and_materials``. This is useful for
+    mapping component groups (e.g. ``component:cube_1``) onto cell ids so they
+    can be used to build an ``openmc.CellFilter``.
+
+    Arguments:
+        filename: the filename of the DAGMC h5m file
+        backend: the backend to use for reading the file ("h5py" or "pymoab")
+
+    Returns:
+        A dictionary mapping group names to sorted lists of cell ids, e.g.
+        ``{"component:cube_1": [12, 13], "component:cube_2": [14]}``
+    """
+    _validate_backend(backend)
+    if not Path(filename).is_file():
+        raise FileNotFoundError(f"filename provided ({filename}) does not exist")
+
+    if backend == "pymoab":
+        _check_pymoab_available()
+        return _get_cell_ids_by_group_name_pymoab(filename)
+    return _get_cell_ids_by_group_name_h5py(filename)
+
+
+def get_groups_by_cell_id(
+    filename: str,
+    backend: Literal["h5py", "pymoab"] = "h5py",
+) -> Dict[int, List[str]]:
+    """Reads in a DAGMC h5m file and finds, for each cell (volume) id, the
+    non-material groups it belongs to.
+
+    This is the inverse of ``get_cell_ids_by_group_name``. Material groups
+    (those tagged with a ``mat:`` prefix) are excluded. Only cells that belong
+    to at least one non-material group are included in the returned mapping.
+
+    Arguments:
+        filename: the filename of the DAGMC h5m file
+        backend: the backend to use for reading the file ("h5py" or "pymoab")
+
+    Returns:
+        A dictionary mapping cell ids to sorted lists of group names, e.g.
+        ``{12: ["component:cube_1"], 13: ["component:cube_1"]}``
+    """
+    cell_ids_by_group = get_cell_ids_by_group_name(filename, backend=backend)
+
+    groups_by_cell: Dict[int, List[str]] = {}
+    for group_name, cell_ids in cell_ids_by_group.items():
+        for cell_id in cell_ids:
+            existing = groups_by_cell.setdefault(cell_id, [])
+            if group_name not in existing:
+                existing.append(group_name)
+
+    return {
+        cell_id: sorted(groups_by_cell[cell_id]) for cell_id in sorted(groups_by_cell)
+    }
 
 
 def get_bounding_box(
