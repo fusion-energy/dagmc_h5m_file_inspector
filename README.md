@@ -339,7 +339,8 @@ The resulting Paraview files have color for cell IDs and material tags present w
 
 ```python
 import dagmc_h5m_file_inspector as di
-di.convert_h5m_to_vtkhdf(h5m_filename='dagmc.h5m', vtkhdf_filename= 'dagmc.vtkhdf')
+
+di.convert_h5m_to_vtkhdf(h5m_filename="dagmc.h5m", vtkhdf_filename="dagmc.vtkhdf")
 ```
 
 ![vtk file from dagmc.h5m](dagmc-converted-to-vtkhdf.png)

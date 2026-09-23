@@ -2231,7 +2231,7 @@ def test_rotate_around_axis_file_not_found(backend):
 
 
 @pytest.mark.parametrize("backend", ["h5py", "pymoab"])
-def test_rotate_around_axis_openmc_transport(touching_boxes, backend, tmp_path):
+def test_rotate_around_axis_openmc_transport(cube_geometry, backend, tmp_path):
     """Verify that a rotated h5m file is a valid DAGMC geometry by running
     OpenMC fixed-source particle transport through it.
     """
@@ -2239,7 +2239,7 @@ def test_rotate_around_axis_openmc_transport(touching_boxes, backend, tmp_path):
 
     output = str(tmp_path / f"rotated_transport_{backend}.h5m")
     di.rotate_around_axis(
-        filename=touching_boxes["filename"],
+        filename=cube_geometry["filename"],
         axis="z",
         degrees=90,
         output=output,
@@ -2445,7 +2445,7 @@ def test_move_file_not_found(backend):
 
 
 @pytest.mark.parametrize("backend", ["h5py", "pymoab"])
-def test_move_openmc_transport(touching_boxes, backend, tmp_path):
+def test_move_openmc_transport(cube_geometry, backend, tmp_path):
     """Verify that a moved h5m file is a valid DAGMC geometry by running
     OpenMC fixed-source particle transport through it.
     """
@@ -2453,7 +2453,7 @@ def test_move_openmc_transport(touching_boxes, backend, tmp_path):
 
     output = str(tmp_path / f"moved_transport_{backend}.h5m")
     di.move(
-        filename=touching_boxes["filename"],
+        filename=cube_geometry["filename"],
         x=100.0,
         y=50.0,
         z=-25.0,
