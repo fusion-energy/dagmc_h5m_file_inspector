@@ -1620,81 +1620,6 @@ def _write_h5m(
         tstt.attrs.create("max_id", np.uint64(global_id - 1))
 
 
-def _remove_materials_h5py(
-    input_filename: str,
-    output_filename: str,
-    materials_to_remove: List[str],
-) -> List[str]:
-    """Remove materials using h5py backend (read-filter-write approach)."""
-    vol_mat = get_volumes_and_materials(
-        filename=input_filename, remove_prefix=True, backend="h5py"
-    )
-    all_materials = sorted(set(vol_mat.values()))
-    matched = sorted(set(materials_to_remove) & set(all_materials))
-    if not matched:
-        raise ValueError(
-            f"None of the specified materials {materials_to_remove} found in "
-            f"{input_filename}. Available materials: {all_materials}"
-        )
-
-    vol_data = get_triangle_conn_and_coords_by_volume(
-        filename=input_filename, backend="h5py"
-    )
-
-    keep_vols = {
-        vid: mat for vid, mat in vol_mat.items() if mat not in materials_to_remove
-    }
-
-    if not keep_vols:
-        # All volumes removed — write an empty-ish file
-        _write_h5m(output_filename, {}, {})
-    else:
-        keep_data = {vid: vol_data[vid] for vid in keep_vols}
-        _write_h5m(output_filename, keep_data, keep_vols)
-
-    return matched
-
-
-def _remove_materials_pymoab(
-    input_filename: str,
-    output_filename: str,
-    materials_to_remove: List[str],
-) -> List[str]:
-    """Remove materials using pymoab backend.
-
-    Uses the same read-filter-write approach as the h5py backend: reads the
-    data, filters out unwanted volumes, and writes a fresh file using
-    ``_write_h5m``.  This avoids issues with pymoab's ``write_file`` when
-    all groups are removed.
-    """
-    vol_mat = get_volumes_and_materials(
-        filename=input_filename, remove_prefix=True, backend="pymoab"
-    )
-    all_materials = sorted(set(vol_mat.values()))
-    matched = sorted(set(materials_to_remove) & set(all_materials))
-    if not matched:
-        raise ValueError(
-            f"None of the specified materials {materials_to_remove} found in "
-            f"{input_filename}. Available materials: {all_materials}"
-        )
-
-    vol_data = get_triangle_conn_and_coords_by_volume(
-        filename=input_filename, backend="pymoab"
-    )
-
-    keep_vols = {
-        vid: mat for vid, mat in vol_mat.items() if mat not in materials_to_remove
-    }
-
-    if not keep_vols:
-        _write_h5m(output_filename, {}, {})
-    else:
-        keep_data = {vid: vol_data[vid] for vid in keep_vols}
-        _write_h5m(output_filename, keep_data, keep_vols)
-
-    return matched
-
-
 def _get_triangle_conn_and_coords_pymoab(
     filename: str,
 ) -> Dict[int, Tuple[np.ndarray, np.ndarray]]:
@@ -2849,19 +2774,12 @@ def remove_materials(
         FileNotFoundError: If *input_filename* does not exist.
         ValueError: If none of the specified materials are found in the file.
     """
-    _validate_backend(backend)
-    if not Path(input_filename).is_file():
-        raise FileNotFoundError(f"filename provided ({input_filename}) does not exist")
+    from .dagmc_file import DAGMCFile
 
-    if isinstance(materials_to_remove, str):
-        materials_to_remove = [materials_to_remove]
-
-    if backend == "pymoab":
-        _check_pymoab_available()
-        return _remove_materials_pymoab(
-            input_filename, output_filename, materials_to_remove
-        )
-    return _remove_materials_h5py(input_filename, output_filename, materials_to_remove)
+    dagmc_file = DAGMCFile(input_filename, backend=backend)
+    removed = dagmc_file.remove_materials(materials_to_remove)
+    dagmc_file.write(output_filename)
+    return removed
 
 
 def remove_volumes(
@@ -2888,42 +2806,12 @@ def remove_volumes(
         FileNotFoundError: If *input_filename* does not exist.
         ValueError: If none of the specified volume IDs are found in the file.
     """
-    _validate_backend(backend)
-    if not Path(input_filename).is_file():
-        raise FileNotFoundError(f"filename provided ({input_filename}) does not exist")
+    from .dagmc_file import DAGMCFile
 
-    if isinstance(volume_ids_to_remove, int):
-        volume_ids_to_remove = [volume_ids_to_remove]
-
-    if backend == "pymoab":
-        _check_pymoab_available()
-
-    vol_mat = get_volumes_and_materials(
-        filename=input_filename,
-        remove_prefix=True,
-        backend=backend,
-    )
-    available_volume_ids = sorted(vol_mat)
-    matched = sorted(set(volume_ids_to_remove) & set(available_volume_ids))
-    if not matched:
-        raise ValueError(
-            f"None of the specified volume IDs {volume_ids_to_remove} found in "
-            f"{input_filename}. Available volume IDs: {available_volume_ids}"
-        )
-
-    vol_data = get_triangle_conn_and_coords_by_volume(
-        filename=input_filename,
-        backend=backend,
-    )
-    keep_vol_mat = {
-        volume_id: material
-        for volume_id, material in vol_mat.items()
-        if volume_id not in volume_ids_to_remove
-    }
-    keep_vol_data = {volume_id: vol_data[volume_id] for volume_id in keep_vol_mat}
-
-    _write_h5m(output_filename, keep_vol_data, keep_vol_mat)
-    return matched
+    dagmc_file = DAGMCFile(input_filename, backend=backend)
+    removed = dagmc_file.remove_volumes(volume_ids_to_remove)
+    dagmc_file.write(output_filename)
+    return removed
 
 
 def _rotation_matrix(axis: str, degrees: float) -> np.ndarray:
@@ -3002,19 +2890,11 @@ def rotate_around_axis(
     if backend == "pymoab":
         _check_pymoab_available()
 
-    vol_mat = get_volumes_and_materials(
-        filename=filename, remove_prefix=True, backend=backend
-    )
-    vol_data = get_triangle_conn_and_coords_by_volume(
-        filename=filename, backend=backend
-    )
+    from .dagmc_file import DAGMCFile
 
-    R = _rotation_matrix(axis, degrees)
-    rotated_data = {}
-    for vid, (conn, coords) in vol_data.items():
-        rotated_data[vid] = (conn, coords @ R.T)
-
-    _write_h5m(output, rotated_data, vol_mat)
+    dagmc_file = DAGMCFile(filename, backend=backend)
+    dagmc_file.rotate_around_axis(axis=axis, degrees=degrees)
+    dagmc_file.write(output)
     return output
 
 
@@ -3048,26 +2928,11 @@ def move(
         >>> di.move("dagmc.h5m", x=10.0, y=0.0, z=0.0)
         'dagmc_moved.h5m'
     """
-    _validate_backend(backend)
-    if not Path(filename).is_file():
-        raise FileNotFoundError(f"filename provided ({filename}) does not exist")
+    from .dagmc_file import DAGMCFile
 
-    if backend == "pymoab":
-        _check_pymoab_available()
-
-    vol_mat = get_volumes_and_materials(
-        filename=filename, remove_prefix=True, backend=backend
-    )
-    vol_data = get_triangle_conn_and_coords_by_volume(
-        filename=filename, backend=backend
-    )
-
-    offset = np.array([x, y, z])
-    moved_data = {}
-    for vid, (conn, coords) in vol_data.items():
-        moved_data[vid] = (conn, coords + offset)
-
-    _write_h5m(output, moved_data, vol_mat)
+    dagmc_file = DAGMCFile(filename, backend=backend)
+    dagmc_file.move(x=x, y=y, z=z)
+    dagmc_file.write(output)
     return output
 
 
@@ -3116,16 +2981,11 @@ def combine_h5m_files(
     next_vol_id = 1
 
     for filepath in input_files:
-        vol_mat = get_volumes_and_materials(
-            filename=filepath, remove_prefix=True, backend=backend
-        )
-        vol_data = get_triangle_conn_and_coords_by_volume(
-            filename=filepath, backend=backend
-        )
+        data = _load_dagmc_data(filepath, backend=backend)
 
-        for old_vid in sorted(vol_data.keys()):
-            combined_vol_data[next_vol_id] = vol_data[old_vid]
-            combined_vol_mat[next_vol_id] = vol_mat[old_vid]
+        for old_vid in sorted(data.volume_data):
+            combined_vol_data[next_vol_id] = data.volume_data[old_vid]
+            combined_vol_mat[next_vol_id] = data.volume_materials[old_vid]
             next_vol_id += 1
 
     _write_h5m(output_file, combined_vol_data, combined_vol_mat)
