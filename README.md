@@ -28,8 +28,8 @@ as an alternative backend if installed.
 
 ## Loading once for multiple queries
 
-Use ``DAGMCFile`` when several operations are needed on the same file. The
-geometry and material data are loaded once and reused by each method.
+Use ``DAGMCFile`` for queries and edits. Geometry and material data are loaded
+once and reused by the in-memory methods.
 
 ```python
 import dagmc_h5m_file_inspector as di
@@ -46,6 +46,8 @@ Edits are applied in memory, so several operations can be performed after one
 load and then written once:
 
 ```python
+import dagmc_h5m_file_inspector as di
+
 dagmc = di.DAGMCFile("dagmc.h5m")
 dagmc.remove_volumes(1)
 dagmc.remove_materials("unused_material")
@@ -59,7 +61,8 @@ dagmc.write("modified.h5m")
 ```python
 import dagmc_h5m_file_inspector as di
 
-di.get_volumes("dagmc.h5m")
+dagmc = di.DAGMCFile("dagmc.h5m")
+dagmc.get_volumes()
 
 >>> [1, 2]
 ```
@@ -69,7 +72,8 @@ di.get_volumes("dagmc.h5m")
 ```python
 import dagmc_h5m_file_inspector as di
 
-di.get_materials("dagmc.h5m")
+dagmc = di.DAGMCFile("dagmc.h5m")
+dagmc.get_materials()
 
 >>> ['big_box', 'small_box']
 ```
@@ -79,7 +83,8 @@ di.get_materials("dagmc.h5m")
 ```python
 import dagmc_h5m_file_inspector as di
 
-di.get_volumes_and_materials("dagmc.h5m")
+dagmc = di.DAGMCFile("dagmc.h5m")
+dagmc.get_volumes_and_materials()
 
 >>> {1: 'small_box', 2: 'big_box'}
 ```
@@ -96,7 +101,8 @@ surface that non-material group membership so you can map groups onto cell
 ```python
 import dagmc_h5m_file_inspector as di
 
-di.get_cell_ids_by_group_name("dagmc.h5m")
+dagmc = di.DAGMCFile("dagmc.h5m")
+dagmc.get_cell_ids_by_group_name()
 
 >>> {'component:small_box': [1], 'component:big_box': [2], 'assembly:all': [1, 2]}
 ```
@@ -106,7 +112,8 @@ The inverse mapping (cell ID to the groups it belongs to) is also available:
 ```python
 import dagmc_h5m_file_inspector as di
 
-di.get_groups_by_cell_id("dagmc.h5m")
+dagmc = di.DAGMCFile("dagmc.h5m")
+dagmc.get_groups_by_cell_id()
 
 >>> {1: ['assembly:all', 'component:small_box'], 2: ['assembly:all', 'component:big_box']}
 ```
@@ -118,7 +125,8 @@ material definitions:
 import openmc
 import dagmc_h5m_file_inspector as di
 
-cell_ids = di.get_cell_ids_by_group_name("dagmc.h5m")["component:small_box"]
+dagmc = di.DAGMCFile("dagmc.h5m")
+cell_ids = dagmc.get_cell_ids_by_group_name()["component:small_box"]
 cell_filter = openmc.CellFilter(cell_ids)
 ```
 
@@ -127,7 +135,8 @@ cell_filter = openmc.CellFilter(cell_ids)
 ```python
 import dagmc_h5m_file_inspector as di
 
-di.get_surface_ids("dagmc.h5m")
+dagmc = di.DAGMCFile("dagmc.h5m")
+dagmc.get_surface_ids()
 
 >>> [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
 ```
@@ -137,7 +146,8 @@ di.get_surface_ids("dagmc.h5m")
 ```python
 import dagmc_h5m_file_inspector as di
 
-di.get_surface_ids_by_cell_id("dagmc.h5m", cell_id=1)
+dagmc = di.DAGMCFile("dagmc.h5m")
+dagmc.get_surface_ids_by_cell_id(cell_id=1)
 
 >>> [1, 2, 3, 4, 5, 6]
 ```
@@ -147,7 +157,8 @@ di.get_surface_ids_by_cell_id("dagmc.h5m", cell_id=1)
 ```python
 import dagmc_h5m_file_inspector as di
 
-di.get_surface_ids_by_material_name("dagmc.h5m", material="small_box")
+dagmc = di.DAGMCFile("dagmc.h5m")
+dagmc.get_surface_ids_by_material_name(material="small_box")
 
 >>> [1, 2, 3, 4, 5, 6]
 ```
@@ -159,7 +170,8 @@ Returns a `BoundingBox` object that is API compatible with OpenMC's `openmc.Boun
 ```python
 import dagmc_h5m_file_inspector as di
 
-bbox = di.get_bounding_box("dagmc.h5m")
+dagmc = di.DAGMCFile("dagmc.h5m")
+bbox = dagmc.get_bounding_box()
 
 >>> bbox
 BoundingBox((-5.0, -10.0, -10.0), (25.0, 10.0, 10.0))
@@ -174,7 +186,7 @@ BoundingBox((-5.0, -10.0, -10.0), (25.0, 10.0, 10.0))
 (10.0, 0.0, 0.0)
 
 >>> bbox.volume
-18000.0
+12000.0
 
 >>> bbox.width
 (30.0, 20.0, 20.0)
@@ -207,8 +219,10 @@ Optionally filter by material tag to get the bounding box for specific materials
 ```python
 import dagmc_h5m_file_inspector as di
 
+dagmc = di.DAGMCFile("dagmc.h5m")
+
 # Bounding box for a single material
-bbox = di.get_bounding_box("dagmc.h5m", materials="small_box")
+bbox = dagmc.get_bounding_box(materials="small_box")
 
 >>> bbox.lower_left
 (-5.0, -5.0, -5.0)
@@ -217,7 +231,7 @@ bbox = di.get_bounding_box("dagmc.h5m", materials="small_box")
 (5.0, 5.0, 5.0)
 
 # Bounding box for multiple materials (combined)
-bbox = di.get_bounding_box("dagmc.h5m", materials=["small_box", "big_box"])
+bbox = dagmc.get_bounding_box(materials=["small_box", "big_box"])
 
 >>> bbox.lower_left
 (-5.0, -10.0, -10.0)
@@ -231,7 +245,8 @@ bbox = di.get_bounding_box("dagmc.h5m", materials=["small_box", "big_box"])
 ```python
 import dagmc_h5m_file_inspector as di
 
-di.get_volumes_by_cell_id("dagmc.h5m")
+dagmc = di.DAGMCFile("dagmc.h5m")
+dagmc.get_volumes_by_cell_id()
 
 >>> {1: 1000.0, 2: 8000.0}
 ```
@@ -241,7 +256,8 @@ di.get_volumes_by_cell_id("dagmc.h5m")
 ```python
 import dagmc_h5m_file_inspector as di
 
-di.get_volumes_by_material_name("dagmc.h5m")
+dagmc = di.DAGMCFile("dagmc.h5m")
+dagmc.get_volumes_by_material_name()
 
 >>> {'small_box': 1000.0, 'big_box': 8000.0}
 ```
@@ -251,7 +267,8 @@ di.get_volumes_by_material_name("dagmc.h5m")
 ```python
 import dagmc_h5m_file_inspector as di
 
-di.get_volumes_by_cell_id_and_material_name("dagmc.h5m")
+dagmc = di.DAGMCFile("dagmc.h5m")
+dagmc.get_volumes_by_cell_id_and_material_name()
 
 >>> {(1, 'small_box'): 1000.0, (2, 'big_box'): 8000.0}
 ```
@@ -263,7 +280,8 @@ Returns a list of surface areas, one per DAGMC surface bounding the volume.
 ```python
 import dagmc_h5m_file_inspector as di
 
-di.get_surface_area_by_cell_id("dagmc.h5m", cell_id=1)
+dagmc = di.DAGMCFile("dagmc.h5m")
+dagmc.get_surface_area_by_cell_id(cell_id=1)
 
 >>> [100.0, 100.0, 100.0, 100.0, 100.0, 100.0]
 ```
@@ -276,7 +294,8 @@ with the given material.
 ```python
 import dagmc_h5m_file_inspector as di
 
-di.get_surface_area_by_material_name("dagmc.h5m", material="small_box")
+dagmc = di.DAGMCFile("dagmc.h5m")
+dagmc.get_surface_area_by_material_name(material="small_box")
 
 >>> [100.0, 100.0, 100.0, 100.0, 100.0, 100.0]
 ```
@@ -289,7 +308,8 @@ computing wall loading when combined with surface current tallies.
 ```python
 import dagmc_h5m_file_inspector as di
 
-di.get_surface_area_by_surface_id("dagmc.h5m")
+dagmc = di.DAGMCFile("dagmc.h5m")
+dagmc.get_surface_area_by_surface_id()
 
 >>> {1: 100.0, 2: 100.0, 3: 100.0, 4: 100.0, 5: 100.0, 6: 100.0,
      7: 100.0, 8: 400.0, 9: 400.0, 10: 400.0, 11: 400.0, 12: 400.0}
@@ -303,7 +323,8 @@ that share it. Useful for identifying interfaces between volumes.
 ```python
 import dagmc_h5m_file_inspector as di
 
-di.get_surface_shared_status("dagmc.h5m")
+dagmc = di.DAGMCFile("dagmc.h5m")
+dagmc.get_surface_shared_status()
 
 >>> {1: {'materials': ['small_box'], 'cell_ids': [1]},
      2: {'materials': ['small_box'], 'cell_ids': [1]},
@@ -314,7 +335,7 @@ di.get_surface_shared_status("dagmc.h5m")
 
 ## Setting OpenMC material volumes from DAGMC geometry
 
-This function reads the DAGMC file, matches materials by name, and sets the
+This method reads the DAGMC file, matches materials by name, and sets the
 `volume` attribute on the corresponding OpenMC Material objects.
 
 ```python
@@ -327,7 +348,8 @@ big_box = openmc.Material(name='big_box')
 materials = openmc.Materials([small_box, big_box])
 
 # Set volumes from DAGMC geometry
-di.set_openmc_material_volumes(materials, "dagmc.h5m")
+dagmc = di.DAGMCFile("dagmc.h5m")
+dagmc.set_openmc_material_volumes(materials)
 
 >>> small_box.volume
 1000.0
@@ -338,14 +360,15 @@ di.set_openmc_material_volumes(materials, "dagmc.h5m")
 
 ## Getting triangle connectivity and coordinates for each volume
 
-This function extracts the triangle mesh data for each volume, returning the
+This method extracts the triangle mesh data for each volume, returning the
 connectivity (vertex indices) and coordinates (3D points) needed for visualization
 or mesh processing.
 
 ```python
 import dagmc_h5m_file_inspector as di
 
-data = di.get_triangle_conn_and_coords_by_volume("dagmc.h5m")
+dagmc = di.DAGMCFile("dagmc.h5m")
+data = dagmc.get_triangle_conn_and_coords_by_volume()
 
 >>> data
 {1: (array([[0, 1, 2], [0, 2, 3], ...]), array([[0., 0., 0.], [10., 0., 0.], ...])),
@@ -368,7 +391,8 @@ The resulting Paraview files have color for cell IDs and material tags present w
 ```python
 import dagmc_h5m_file_inspector as di
 
-di.convert_h5m_to_vtkhdf(h5m_filename="dagmc.h5m", vtkhdf_filename="dagmc.vtkhdf")
+dagmc = di.DAGMCFile("dagmc.h5m")
+dagmc.convert_to_vtkhdf("dagmc.vtkhdf")
 ```
 
 ![vtk file from dagmc.h5m](dagmc-converted-to-vtkhdf.png)
@@ -383,18 +407,17 @@ writing the result to a new file.
 ```python
 import dagmc_h5m_file_inspector as di
 
-di.get_materials("dagmc.h5m")
+dagmc = di.DAGMCFile("dagmc.h5m")
+dagmc.get_materials()
 
 >>> ['big_box', 'small_box']
 
 # Remove a single material
-di.remove_materials(
-    input_filename="dagmc.h5m",
-    output_filename="dagmc_reduced.h5m",
-    materials_to_remove="small_box",
-)
+dagmc.remove_materials("small_box")
+dagmc.write("dagmc_reduced.h5m")
 
-di.get_materials("dagmc_reduced.h5m")
+reduced = di.DAGMCFile("dagmc_reduced.h5m")
+reduced.get_materials()
 
 >>> ['big_box']
 ```
@@ -402,18 +425,17 @@ di.get_materials("dagmc_reduced.h5m")
 ```python
 import dagmc_h5m_file_inspector as di
 
-di.get_materials("reactor.h5m")
+reactor = di.DAGMCFile("reactor.h5m")
+reactor.get_materials()
 
 >>> ['blanket', 'first_wall', 'shield']
 
 # Remove multiple materials
-di.remove_materials(
-    input_filename="reactor.h5m",
-    output_filename="reactor_reduced.h5m",
-    materials_to_remove=["blanket", "shield"],
-)
+reactor.remove_materials(["blanket", "shield"])
+reactor.write("reactor_reduced.h5m")
 
-di.get_materials("reactor_reduced.h5m")
+reduced = di.DAGMCFile("reactor_reduced.h5m")
+reduced.get_materials()
 
 >>> ['first_wall']
 ```
@@ -426,17 +448,16 @@ tags remain when they are also used by a surviving volume.
 ```python
 import dagmc_h5m_file_inspector as di
 
-di.get_volumes_and_materials("dagmc.h5m")
+dagmc = di.DAGMCFile("dagmc.h5m")
+dagmc.get_volumes_and_materials()
 
 >>> {1: 'steel', 2: 'steel', 3: 'water'}
 
-di.remove_volumes(
-    input_filename="dagmc.h5m",
-    output_filename="dagmc_reduced.h5m",
-    volume_ids_to_remove=1,
-)
+dagmc.remove_volumes(1)
+dagmc.write("dagmc_reduced.h5m")
 
-di.get_volumes_and_materials("dagmc_reduced.h5m")
+reduced = di.DAGMCFile("dagmc_reduced.h5m")
+reduced.get_volumes_and_materials()
 
 >>> {2: 'steel', 3: 'water'}
 ```
@@ -448,12 +469,9 @@ Rotate the mesh coordinates around a coordinate axis and write a new h5m file.
 ```python
 import dagmc_h5m_file_inspector as di
 
-di.rotate_around_axis(
-    filename="dagmc.h5m",
-    axis="z",
-    degrees=90,
-    output="dagmc_rotated.h5m",
-)
+dagmc = di.DAGMCFile("dagmc.h5m")
+dagmc.rotate_around_axis(axis="z", degrees=90)
+dagmc.write("dagmc_rotated.h5m")
 ```
 
 ## Moving a DAGMC geometry
@@ -463,13 +481,9 @@ Translate (move) the mesh coordinates by an offset and write a new h5m file.
 ```python
 import dagmc_h5m_file_inspector as di
 
-di.move(
-    filename="dagmc.h5m",
-    x=10.0,
-    y=0.0,
-    z=0.0,
-    output="dagmc_moved.h5m",
-)
+dagmc = di.DAGMCFile("dagmc.h5m")
+dagmc.move(x=10.0, y=0.0, z=0.0)
+dagmc.write("dagmc_moved.h5m")
 ```
 
 ## Setting boundary conditions on surfaces
@@ -481,14 +495,15 @@ the boundary condition during transport.
 ```python
 import dagmc_h5m_file_inspector as di
 
+dagmc = di.DAGMCFile("dagmc.h5m")
+
 # Find surface IDs and their areas
-areas = di.get_surface_area_by_surface_id("dagmc.h5m")
+areas = dagmc.get_surface_area_by_surface_id()
 
 >>> {1: 50.0, 2: 80.0}
 
 # Set the larger surface to vacuum (e.g. outer surface of a shell)
-di.set_boundary_condition(
-    input_filename="dagmc.h5m",
+dagmc.set_boundary_condition(
     surface_id=2,
     boundary_condition="vacuum",
     output_filename="dagmc_with_bc.h5m",
@@ -507,29 +522,30 @@ geometries do not overlap.
 ```python
 import dagmc_h5m_file_inspector as di
 
-di.combine_h5m_files(
+combined = di.DAGMCFile.combine_h5m_files(
     input_files=["file_a.h5m", "file_b.h5m"],
     output_file="combined.h5m",
 )
 
-di.get_volumes("combined.h5m")
+combined.get_volumes()
 
 >>> [1, 2]
 
-di.get_materials("combined.h5m")
+combined.get_materials()
 
 >>> ['mat_a', 'mat_b']
 ```
 
 ## Using the pymoab backend
 
-All functions support an optional `backend` parameter. The default is `"h5py"`,
-but `"pymoab"` can be used if pymoab is installed:
+The backend is selected when constructing a `DAGMCFile`. The default is
+`"h5py"`, but `"pymoab"` can be used if pymoab is installed:
 
 ```python
 import dagmc_h5m_file_inspector as di
 
-di.get_volumes("dagmc.h5m", backend="pymoab")
+dagmc = di.DAGMCFile("dagmc.h5m", backend="pymoab")
+dagmc.get_volumes()
 
 >>> [1, 2]
 ```
