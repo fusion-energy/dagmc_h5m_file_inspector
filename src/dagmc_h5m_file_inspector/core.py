@@ -30,6 +30,14 @@ class _SetInfo:
     flags: int
 
 
+@dataclass
+class _DAGMCData:
+    """Mutable in-memory data needed by DAGMC geometry operations."""
+
+    volume_data: Dict[int, Tuple[np.ndarray, np.ndarray]]
+    volume_materials: Dict[int, str]
+
+
 # This is a reimplementation of the BoundingBox class that is mainly
 # API compatible with OpenMC. One difference is that this one does not
 # make any use of Numpy.
@@ -282,35 +290,42 @@ def _get_volumes_and_materials_h5py(
 ) -> Dict[int, str]:
     """Get volume-to-material mapping using h5py backend."""
     with h5py.File(filename, "r") as f:
-        sets = _read_sets_h5py(f)
-        categories = _read_tag_h5py(f, "CATEGORY")
-        names = _read_tag_h5py(f, "NAME")
-        geom_dim = _read_tag_h5py(f, "GEOM_DIMENSION")
+        return _get_volumes_and_materials_from_h5py(f, remove_prefix)
 
-        global_ids: Dict[int, int] = {}
-        sets_start_id = int(f["tstt/sets/list"].attrs["start_id"])
-        if "tstt/sets/tags/GLOBAL_ID" in f:
-            dense_gids = f["tstt/sets/tags/GLOBAL_ID"][...]
-            for idx, gid in enumerate(dense_gids):
-                global_ids[sets_start_id + idx] = int(gid)
-        else:
-            global_ids = _read_tag_h5py(f, "GLOBAL_ID")
 
-        volume_handles = {h for h, cat in categories.items() if cat == "Volume"}
-        volume_handles.update(h for h, dim in geom_dim.items() if dim == 3)
+def _get_volumes_and_materials_from_h5py(
+    f: h5py.File, remove_prefix: bool
+) -> Dict[int, str]:
+    """Get volume-to-material mapping from an open h5py file."""
+    sets = _read_sets_h5py(f)
+    categories = _read_tag_h5py(f, "CATEGORY")
+    names = _read_tag_h5py(f, "NAME")
+    geom_dim = _read_tag_h5py(f, "GEOM_DIMENSION")
 
-        vol_mat: Dict[int, str] = {}
-        for set_info in sets:
-            material_name = names.get(set_info.handle, "")
-            if not material_name.startswith("mat:"):
-                continue
-            if remove_prefix:
-                material_name = material_name[4:]
-            for handle in _expand_set_contents(set_info):
-                if handle in volume_handles and handle in global_ids:
-                    vol_mat[global_ids[handle]] = material_name
+    global_ids: Dict[int, int] = {}
+    sets_start_id = int(f["tstt/sets/list"].attrs["start_id"])
+    if "tstt/sets/tags/GLOBAL_ID" in f:
+        dense_gids = f["tstt/sets/tags/GLOBAL_ID"][...]
+        for idx, gid in enumerate(dense_gids):
+            global_ids[sets_start_id + idx] = int(gid)
+    else:
+        global_ids = _read_tag_h5py(f, "GLOBAL_ID")
 
-        return {volume_id: vol_mat[volume_id] for volume_id in sorted(vol_mat)}
+    volume_handles = {h for h, cat in categories.items() if cat == "Volume"}
+    volume_handles.update(h for h, dim in geom_dim.items() if dim == 3)
+
+    vol_mat: Dict[int, str] = {}
+    for set_info in sets:
+        material_name = names.get(set_info.handle, "")
+        if not material_name.startswith("mat:"):
+            continue
+        if remove_prefix:
+            material_name = material_name[4:]
+        for handle in _expand_set_contents(set_info):
+            if handle in volume_handles and handle in global_ids:
+                vol_mat[global_ids[handle]] = material_name
+
+    return {volume_id: vol_mat[volume_id] for volume_id in sorted(vol_mat)}
 
 
 def _get_cell_ids_by_group_name_h5py(filename: str) -> Dict[str, List[int]]:
@@ -1059,9 +1074,16 @@ def _get_volumes_and_materials_pymoab(
     filename: str, remove_prefix: bool
 ) -> Dict[int, str]:
     """Get volume-to-material mapping using pymoab backend."""
+    mbcore = _load_moab_file(filename)
+    return _get_volumes_and_materials_from_pymoab(mbcore, remove_prefix)
+
+
+def _get_volumes_and_materials_from_pymoab(
+    mbcore: object, remove_prefix: bool
+) -> Dict[int, str]:
+    """Get volume-to-material mapping from a loaded pymoab Core object."""
     import pymoab as mb
 
-    mbcore = _load_moab_file(filename)
     group_ents = _get_groups_pymoab(mbcore)
     name_tag = mbcore.tag_get_handle(mb.types.NAME_TAG_NAME)
     id_tag = mbcore.tag_get_handle(mb.types.GLOBAL_ID_TAG_NAME)
@@ -1144,97 +1166,104 @@ def _get_triangle_conn_and_coords_h5py(
     coordinates array for that volume.
     """
     with h5py.File(filename, "r") as f:
-        coords, node_start = _read_nodes_h5py(f)
-        tri_conn, tri_start = _read_tri3_connectivity_h5py(f)
-        tri_conn0 = tri_conn - node_start  # Convert to 0-based indexing
-        tri_end = tri_start + tri_conn.shape[0] - 1
+        return _get_triangle_conn_and_coords_from_h5py(f)
 
-        sets = _read_sets_h5py(f)
-        sets_by_handle = {s.handle: s for s in sets}
 
-        categories = _read_tag_h5py(f, "CATEGORY")
-        geom_dim = _read_tag_h5py(f, "GEOM_DIMENSION")
+def _get_triangle_conn_and_coords_from_h5py(
+    f: h5py.File,
+) -> Dict[int, Tuple[np.ndarray, np.ndarray]]:
+    """Get per-volume triangle data from an open h5py file."""
+    coords, node_start = _read_nodes_h5py(f)
+    tri_conn, tri_start = _read_tri3_connectivity_h5py(f)
+    tri_conn0 = tri_conn - node_start  # Convert to 0-based indexing
+    tri_end = tri_start + tri_conn.shape[0] - 1
 
-        # Get GLOBAL_ID for sets
-        global_ids: Dict[int, int] = {}
-        sets_start_id = int(f["tstt/sets/list"].attrs["start_id"])
-        if "tstt/sets/tags/GLOBAL_ID" in f:
-            dense_gids = f["tstt/sets/tags/GLOBAL_ID"][...]
-            for idx, gid in enumerate(dense_gids):
-                handle = sets_start_id + idx
-                global_ids[handle] = int(gid)
+    sets = _read_sets_h5py(f)
+    sets_by_handle = {s.handle: s for s in sets}
+
+    categories = _read_tag_h5py(f, "CATEGORY")
+    geom_dim = _read_tag_h5py(f, "GEOM_DIMENSION")
+
+    # Get GLOBAL_ID for sets
+    global_ids: Dict[int, int] = {}
+    sets_start_id = int(f["tstt/sets/list"].attrs["start_id"])
+    if "tstt/sets/tags/GLOBAL_ID" in f:
+        dense_gids = f["tstt/sets/tags/GLOBAL_ID"][...]
+        for idx, gid in enumerate(dense_gids):
+            handle = sets_start_id + idx
+            global_ids[handle] = int(gid)
+    else:
+        global_ids = _read_tag_h5py(f, "GLOBAL_ID")
+
+    # Build set of surface handles
+    surface_handles = {h for h, cat in categories.items() if cat == "Surface"}
+    surface_handles.update(h for h, dim in geom_dim.items() if dim == 2)
+
+    # Build set of volume handles
+    volume_handles = {h for h, cat in categories.items() if cat == "Volume"}
+    volume_handles.update(h for h, dim in geom_dim.items() if dim == 3)
+
+    result: Dict[int, Tuple[np.ndarray, np.ndarray]] = {}
+
+    for vol_handle in volume_handles:
+        vol_gid = global_ids.get(vol_handle)
+        if vol_gid is None:
+            continue
+
+        volume_set = sets_by_handle.get(vol_handle)
+        if volume_set is None:
+            continue
+
+        # Get child surfaces of this volume
+        if volume_set.children:
+            surfaces = [h for h in volume_set.children if h in surface_handles]
         else:
-            global_ids = _read_tag_h5py(f, "GLOBAL_ID")
+            # Fallback: find surfaces that reference this volume
+            surfaces = list(surface_handles)
 
-        # Build set of surface handles
-        surface_handles = {h for h, cat in categories.items() if cat == "Surface"}
-        surface_handles.update(h for h, dim in geom_dim.items() if dim == 2)
-
-        # Build set of volume handles
-        volume_handles = {h for h, cat in categories.items() if cat == "Volume"}
-        volume_handles.update(h for h, dim in geom_dim.items() if dim == 3)
-
-        result: Dict[int, Tuple[np.ndarray, np.ndarray]] = {}
-
-        for vol_handle in volume_handles:
-            vol_gid = global_ids.get(vol_handle)
-            if vol_gid is None:
+        # Collect all triangle indices for this volume
+        all_tri_indices: List[int] = []
+        for surf_handle in surfaces:
+            surf_set = sets_by_handle.get(surf_handle)
+            if surf_set is None:
                 continue
 
-            volume_set = sets_by_handle.get(vol_handle)
-            if volume_set is None:
-                continue
-
-            # Get child surfaces of this volume
-            if volume_set.children:
-                surfaces = [h for h in volume_set.children if h in surface_handles]
-            else:
-                # Fallback: find surfaces that reference this volume
-                surfaces = list(surface_handles)
-
-            # Collect all triangle indices for this volume
-            all_tri_indices: List[int] = []
-            for surf_handle in surfaces:
-                surf_set = sets_by_handle.get(surf_handle)
-                if surf_set is None:
-                    continue
-
-                tri_indices = _tri_indices_for_set(
-                    surf_set,
-                    tri_start=tri_start,
-                    tri_end=tri_end,
-                )
-                all_tri_indices.extend(tri_indices.tolist())
-
-            if not all_tri_indices:
-                # Empty volume
-                result[int(vol_gid)] = (
-                    np.array([], dtype=np.int64).reshape(0, 3),
-                    np.array([], dtype=np.float64).reshape(0, 3),
-                )
-                continue
-
-            all_tri_indices = np.array(all_tri_indices, dtype=np.int64)
-
-            # Get the triangles for this volume
-            volume_tris = tri_conn0[all_tri_indices]
-
-            # Find unique vertex indices and create local indexing
-            unique_verts = np.unique(volume_tris)
-            vert_to_local = {v: i for i, v in enumerate(unique_verts)}
-
-            # Extract coordinates for these vertices
-            volume_coords = coords[unique_verts]
-
-            # Re-index connectivity to be 0-based relative to volume_coords
-            local_conn = np.array(
-                [[vert_to_local[v] for v in tri] for tri in volume_tris],
-                dtype=np.int64,
+            tri_indices = _tri_indices_for_set(
+                surf_set,
+                tri_start=tri_start,
+                tri_end=tri_end,
             )
+            all_tri_indices.extend(tri_indices.tolist())
 
-            result[int(vol_gid)] = (local_conn, volume_coords)
+        if not all_tri_indices:
+            # Empty volume
+            result[int(vol_gid)] = (
+                np.array([], dtype=np.int64).reshape(0, 3),
+                np.array([], dtype=np.float64).reshape(0, 3),
+            )
+            continue
 
-        return result
+        all_tri_indices_array = np.array(all_tri_indices, dtype=np.int64)
+
+        # Get the triangles for this volume
+        volume_tris = tri_conn0[all_tri_indices_array]
+
+        # Find unique vertex indices and create local indexing
+        unique_verts = np.unique(volume_tris)
+        vert_to_local = {v: i for i, v in enumerate(unique_verts)}
+
+        # Extract coordinates for these vertices
+        volume_coords = coords[unique_verts]
+
+        # Re-index connectivity to be 0-based relative to volume_coords
+        local_conn = np.array(
+            [[vert_to_local[v] for v in tri] for tri in volume_tris],
+            dtype=np.int64,
+        )
+
+        result[int(vol_gid)] = (local_conn, volume_coords)
+
+    return result
 
 
 def _write_h5m(
@@ -1676,9 +1705,16 @@ def _get_triangle_conn_and_coords_pymoab(
     array of 3D points. The connectivity indices are 0-based relative to the
     coordinates array for that volume.
     """
+    mbcore = _load_moab_file(filename)
+    return _get_triangle_conn_and_coords_from_pymoab(mbcore)
+
+
+def _get_triangle_conn_and_coords_from_pymoab(
+    mbcore: object,
+) -> Dict[int, Tuple[np.ndarray, np.ndarray]]:
+    """Get per-volume triangle data from a loaded pymoab Core object."""
     import pymoab as mb
 
-    mbcore = _load_moab_file(filename)
     category_tag = mbcore.tag_get_handle(mb.types.CATEGORY_TAG_NAME)
     id_tag = mbcore.tag_get_handle(mb.types.GLOBAL_ID_TAG_NAME)
 
@@ -1729,6 +1765,34 @@ def _get_triangle_conn_and_coords_pymoab(
         result[vol_gid] = (local_conn, volume_coords)
 
     return result
+
+
+def _load_dagmc_data(
+    filename: str,
+    backend: Literal["h5py", "pymoab"] = "h5py",
+) -> _DAGMCData:
+    """Load mutable geometry and material data with one backend load."""
+    _validate_backend(backend)
+    if not Path(filename).is_file():
+        raise FileNotFoundError(f"filename provided ({filename}) does not exist")
+
+    if backend == "pymoab":
+        _check_pymoab_available()
+        mbcore = _load_moab_file(filename)
+        return _DAGMCData(
+            volume_data=_get_triangle_conn_and_coords_from_pymoab(mbcore),
+            volume_materials=_get_volumes_and_materials_from_pymoab(
+                mbcore, remove_prefix=True
+            ),
+        )
+
+    with h5py.File(filename, "r") as f:
+        return _DAGMCData(
+            volume_data=_get_triangle_conn_and_coords_from_h5py(f),
+            volume_materials=_get_volumes_and_materials_from_h5py(
+                f, remove_prefix=True
+            ),
+        )
 
 
 def _get_volumes_sizes_pymoab(filename: str) -> Dict[int, float]:
