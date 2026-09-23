@@ -42,6 +42,18 @@ volumes_and_materials = dagmc.get_volumes_and_materials()
 bounding_box = dagmc.get_bounding_box()
 ```
 
+Edits are applied in memory, so several operations can be performed after one
+load and then written once:
+
+```python
+dagmc = di.DAGMCFile("dagmc.h5m")
+dagmc.remove_volumes(1)
+dagmc.remove_materials("unused_material")
+dagmc.move(x=10.0)
+dagmc.rotate_around_axis(axis="z", degrees=45)
+dagmc.write("modified.h5m")
+```
+
 ## Finding volume IDs
 
 ```python
