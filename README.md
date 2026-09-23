@@ -26,6 +26,22 @@ as an alternative backend if installed.
 
 # Python API Usage
 
+## Loading once for multiple queries
+
+Use ``DAGMCFile`` when several operations are needed on the same file. The
+geometry and material data are loaded once and reused by each method.
+
+```python
+import dagmc_h5m_file_inspector as di
+
+dagmc = di.DAGMCFile("dagmc.h5m")
+
+volume_ids = dagmc.get_volumes()
+materials = dagmc.get_materials()
+volumes_and_materials = dagmc.get_volumes_and_materials()
+bounding_box = dagmc.get_bounding_box()
+```
+
 ## Finding volume IDs
 
 ```python
