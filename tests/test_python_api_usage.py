@@ -1581,6 +1581,99 @@ def test_remove_material_openmc_transport(touching_boxes, backend, tmp_path):
         os.chdir(original_dir)
 
 
+# ============================================================================
+# Tests for remove_volumes
+# ============================================================================
+
+
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+def test_remove_single_volume(touching_boxes, backend, tmp_path):
+    """Remove one volume by ID while retaining the other volume."""
+    output = str(tmp_path / f"removed_volume_{backend}.h5m")
+
+    removed = di.remove_volumes(
+        input_filename=touching_boxes["filename"],
+        output_filename=output,
+        volume_ids_to_remove=1,
+        backend=backend,
+    )
+
+    assert removed == [1]
+    assert di.get_volumes(output, backend="h5py") == [2]
+    assert di.get_volumes_and_materials(output, backend="h5py") == {2: "big_box"}
+
+
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+def test_remove_volume_preserves_shared_material(cube_geometry, backend, tmp_path):
+    """A material shared by removed and retained volumes remains in the output."""
+    shared_input = str(tmp_path / f"shared_material_{backend}.h5m")
+    output = str(tmp_path / f"shared_material_removed_{backend}.h5m")
+    di.combine_h5m_files(
+        input_files=[cube_geometry["filename"], cube_geometry["filename"]],
+        output_file=shared_input,
+        backend=backend,
+    )
+
+    assert di.get_volumes_and_materials(shared_input, backend=backend) == {
+        1: "cube",
+        2: "cube",
+    }
+
+    removed = di.remove_volumes(
+        input_filename=shared_input,
+        output_filename=output,
+        volume_ids_to_remove=[1],
+        backend=backend,
+    )
+
+    assert removed == [1]
+    assert di.get_volumes_and_materials(output, backend="h5py") == {2: "cube"}
+    assert di.get_volumes_and_materials(output, backend="pymoab") == {2: "cube"}
+    assert di.get_materials(output, backend="h5py") == ["cube"]
+
+
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+def test_remove_multiple_volumes(separated_boxes, backend, tmp_path):
+    """Remove multiple volume IDs and return the IDs in sorted order."""
+    output = str(tmp_path / f"removed_all_volumes_{backend}.h5m")
+
+    removed = di.remove_volumes(
+        input_filename=separated_boxes["filename"],
+        output_filename=output,
+        volume_ids_to_remove=[2, 1],
+        backend=backend,
+    )
+
+    assert removed == [1, 2]
+    assert di.get_materials(output, backend="h5py") == []
+
+
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+def test_remove_nonexistent_volume_raises(separated_boxes, backend, tmp_path):
+    """Raise ValueError when none of the requested volume IDs exist."""
+    output = str(tmp_path / f"missing_volume_{backend}.h5m")
+
+    with pytest.raises(ValueError, match="None of the specified volume IDs"):
+        di.remove_volumes(
+            input_filename=separated_boxes["filename"],
+            output_filename=output,
+            volume_ids_to_remove=999,
+            backend=backend,
+        )
+
+
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+def test_remove_volume_file_not_found(backend, tmp_path):
+    """Raise FileNotFoundError when the input file does not exist."""
+    with pytest.raises(FileNotFoundError):
+        di.remove_volumes(
+            input_filename="does_not_exist.h5m",
+            output_filename=str(tmp_path / "out.h5m"),
+            volume_ids_to_remove=1,
+            backend=backend,
+        )
+
+
 @pytest.mark.parametrize("filename", H5M_TEST_FILES)
 def test_convert_h5m_to_vtkhdf_all_geometries(filename, tmp_path):
     """Test conversion works for all test geometries"""

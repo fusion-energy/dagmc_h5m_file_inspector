@@ -389,6 +389,29 @@ di.get_materials("reactor_reduced.h5m")
 >>> ['first_wall']
 ```
 
+## Removing volumes from h5m files
+
+Remove one or more volumes by ID while retaining all other volumes. Material
+tags remain when they are also used by a surviving volume.
+
+```python
+import dagmc_h5m_file_inspector as di
+
+di.get_volumes_and_materials("dagmc.h5m")
+
+>>> {1: 'steel', 2: 'steel', 3: 'water'}
+
+di.remove_volumes(
+    input_filename="dagmc.h5m",
+    output_filename="dagmc_reduced.h5m",
+    volume_ids_to_remove=1,
+)
+
+di.get_volumes_and_materials("dagmc_reduced.h5m")
+
+>>> {2: 'steel', 3: 'water'}
+```
+
 ## Rotating a DAGMC geometry around an axis
 
 Rotate the mesh coordinates around a coordinate axis and write a new h5m file.

@@ -282,46 +282,35 @@ def _get_volumes_and_materials_h5py(
 ) -> Dict[int, str]:
     """Get volume-to-material mapping using h5py backend."""
     with h5py.File(filename, "r") as f:
-        global_ids = f["tstt/sets/tags/GLOBAL_ID"][()]
-        cat_ids = f["tstt/tags/CATEGORY/id_list"][()]
-        cat_vals = f["tstt/tags/CATEGORY/values"][()]
-        name_ids = f["tstt/tags/NAME/id_list"][()]
-        name_vals = f["tstt/tags/NAME/values"][()]
+        sets = _read_sets_h5py(f)
+        categories = _read_tag_h5py(f, "CATEGORY")
+        names = _read_tag_h5py(f, "NAME")
+        geom_dim = _read_tag_h5py(f, "GEOM_DIMENSION")
 
-        cat_lookup = {}
-        for eid, val in zip(cat_ids, cat_vals):
-            cat_lookup[int(eid)] = val.tobytes().decode("ascii").rstrip("\x00")
+        global_ids: Dict[int, int] = {}
+        sets_start_id = int(f["tstt/sets/list"].attrs["start_id"])
+        if "tstt/sets/tags/GLOBAL_ID" in f:
+            dense_gids = f["tstt/sets/tags/GLOBAL_ID"][...]
+            for idx, gid in enumerate(dense_gids):
+                global_ids[sets_start_id + idx] = int(gid)
+        else:
+            global_ids = _read_tag_h5py(f, "GLOBAL_ID")
 
-        name_lookup = {}
-        for eid, val in zip(name_ids, name_vals):
-            name_lookup[int(eid)] = val.tobytes().decode("ascii").rstrip("\x00")
+        volume_handles = {h for h, cat in categories.items() if cat == "Volume"}
+        volume_handles.update(h for h, dim in geom_dim.items() if dim == 3)
 
-        base_entity_id = int(cat_ids.min()) - 1
-
-        volumes = []
-        for i in range(len(global_ids)):
-            entity_id = base_entity_id + i
-            if cat_lookup.get(entity_id) == "Volume":
-                volumes.append({"set_idx": i, "gid": int(global_ids[i])})
-
-        groups = []
-        for i in range(len(global_ids)):
-            entity_id = base_entity_id + i
-            name = name_lookup.get(entity_id, "")
-            if name.startswith("mat:"):
-                groups.append({"set_idx": i, "name": name})
-
-        volumes_sorted = sorted(volumes, key=lambda x: x["gid"])
-        groups_sorted = sorted(groups, key=lambda x: x["set_idx"])
-
-        vol_mat = {}
-        for vol, grp in zip(volumes_sorted, groups_sorted):
-            material_name = grp["name"]
+        vol_mat: Dict[int, str] = {}
+        for set_info in sets:
+            material_name = names.get(set_info.handle, "")
+            if not material_name.startswith("mat:"):
+                continue
             if remove_prefix:
                 material_name = material_name[4:]
-            vol_mat[vol["gid"]] = material_name
+            for handle in _expand_set_contents(set_info):
+                if handle in volume_handles and handle in global_ids:
+                    vol_mat[global_ids[handle]] = material_name
 
-        return vol_mat
+        return {volume_id: vol_mat[volume_id] for volume_id in sorted(vol_mat)}
 
 
 def _get_cell_ids_by_group_name_h5py(filename: str) -> Dict[str, List[int]]:
@@ -2809,6 +2798,68 @@ def remove_materials(
             input_filename, output_filename, materials_to_remove
         )
     return _remove_materials_h5py(input_filename, output_filename, materials_to_remove)
+
+
+def remove_volumes(
+    input_filename: str,
+    output_filename: str,
+    volume_ids_to_remove: Union[int, List[int]],
+    backend: Literal["h5py", "pymoab"] = "h5py",
+) -> List[int]:
+    """Remove volumes from a DAGMC h5m file and write a new file without them.
+
+    Material tags used by surviving volumes are retained, including when a
+    removed volume and a surviving volume share the same material tag.
+
+    Arguments:
+        input_filename: path to the input DAGMC h5m file
+        output_filename: path for the output h5m file
+        volume_ids_to_remove: volume ID or list of volume IDs to remove
+        backend: the backend to use ("h5py" or "pymoab")
+
+    Returns:
+        A sorted list of volume IDs that were actually removed.
+
+    Raises:
+        FileNotFoundError: If *input_filename* does not exist.
+        ValueError: If none of the specified volume IDs are found in the file.
+    """
+    _validate_backend(backend)
+    if not Path(input_filename).is_file():
+        raise FileNotFoundError(f"filename provided ({input_filename}) does not exist")
+
+    if isinstance(volume_ids_to_remove, int):
+        volume_ids_to_remove = [volume_ids_to_remove]
+
+    if backend == "pymoab":
+        _check_pymoab_available()
+
+    vol_mat = get_volumes_and_materials(
+        filename=input_filename,
+        remove_prefix=True,
+        backend=backend,
+    )
+    available_volume_ids = sorted(vol_mat)
+    matched = sorted(set(volume_ids_to_remove) & set(available_volume_ids))
+    if not matched:
+        raise ValueError(
+            f"None of the specified volume IDs {volume_ids_to_remove} found in "
+            f"{input_filename}. Available volume IDs: {available_volume_ids}"
+        )
+
+    vol_data = get_triangle_conn_and_coords_by_volume(
+        filename=input_filename,
+        backend=backend,
+    )
+    keep_vol_mat = {
+        volume_id: material
+        for volume_id, material in vol_mat.items()
+        if volume_id not in volume_ids_to_remove
+    }
+    keep_vol_data = {volume_id: vol_data[volume_id] for volume_id in keep_vol_mat}
+
+    _write_h5m(output_filename, keep_vol_data, keep_vol_mat)
+    return matched
 
 
 def _rotation_matrix(axis: str, degrees: float) -> np.ndarray:
