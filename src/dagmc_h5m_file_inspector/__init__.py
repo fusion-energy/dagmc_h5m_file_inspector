@@ -30,9 +30,11 @@ from .core import (
     set_boundary_condition,
     set_openmc_material_volumes,
 )
+from .dagmc_file import DAGMCFile
 
 __all__ = [
     "BoundingBox",
+    "DAGMCFile",
     "combine_h5m_files",
     "convert_h5m_to_vtkhdf",
     "get_bounding_box",

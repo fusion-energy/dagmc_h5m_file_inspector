@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Literal, Optional, Sequence, Tuple, Union
+from typing import Callable, Dict, List, Literal, Optional, Sequence, Tuple, Union
 
 import h5py
 import numpy as np
@@ -28,6 +28,87 @@ class _SetInfo:
     children: Sequence[int]
     parents: Sequence[int]
     flags: int
+
+
+class _DAGMCData:
+    """Mutable in-memory data needed by DAGMC geometry operations.
+
+    Volume ids and material tags come from the sets and tags, which are quick
+    to read. The per-volume triangle connectivity and coordinates cost far more
+    and only some operations need them, so they are read on first use rather
+    than during the load.
+    """
+
+    def __init__(
+        self,
+        metadata_loader: Callable[[], Tuple[List[int], Dict[int, str], List[str]]],
+        volume_data_loader: Callable[[], Dict[int, Tuple[np.ndarray, np.ndarray]]],
+    ) -> None:
+        self._metadata_loader = metadata_loader
+        self._volume_data_loader = volume_data_loader
+        self._volume_ids: Optional[List[int]] = None
+        self._volume_materials: Optional[Dict[int, str]] = None
+        self._materials: Optional[List[str]] = None
+        self._volume_data: Optional[Dict[int, Tuple[np.ndarray, np.ndarray]]] = None
+
+    def _ensure_metadata(self) -> None:
+        """Read the volume ids and materials if they have not been read yet."""
+        if self._volume_ids is None:
+            volume_ids, volume_materials, materials = self._metadata_loader()
+            self._volume_ids = list(volume_ids)
+            self._volume_materials = volume_materials
+            self._materials = materials
+
+    @property
+    def metadata_loaded(self) -> bool:
+        """Whether the volume ids and materials have been read yet."""
+        return self._volume_ids is not None
+
+    @property
+    def volume_ids(self) -> List[int]:
+        self._ensure_metadata()
+        return self._volume_ids
+
+    @volume_ids.setter
+    def volume_ids(self, value: List[int]) -> None:
+        self._ensure_metadata()
+        self._volume_ids = value
+
+    @property
+    def volume_materials(self) -> Dict[int, str]:
+        self._ensure_metadata()
+        return self._volume_materials
+
+    @volume_materials.setter
+    def volume_materials(self, value: Dict[int, str]) -> None:
+        self._ensure_metadata()
+        self._volume_materials = value
+
+    @property
+    def materials(self) -> List[str]:
+        self._ensure_metadata()
+        return self._materials
+
+    @materials.setter
+    def materials(self, value: List[str]) -> None:
+        self._ensure_metadata()
+        self._materials = value
+
+    @property
+    def volume_data(self) -> Dict[int, Tuple[np.ndarray, np.ndarray]]:
+        """Triangle connectivity and coordinates per volume, read on demand."""
+        if self._volume_data is None:
+            self._volume_data = self._volume_data_loader()
+        return self._volume_data
+
+    @volume_data.setter
+    def volume_data(self, value: Dict[int, Tuple[np.ndarray, np.ndarray]]) -> None:
+        self._volume_data = value
+
+    @property
+    def volume_data_loaded(self) -> bool:
+        """Whether the triangle data has been read yet."""
+        return self._volume_data is not None
 
 
 # This is a reimplementation of the BoundingBox class that is mainly
@@ -262,19 +343,21 @@ def _get_surfaces_h5py(filename: str) -> List[int]:
 def _get_materials_h5py(filename: str, remove_prefix: bool) -> List[str]:
     """Get material names using h5py backend."""
     with h5py.File(filename, "r") as f:
-        name_ids = f["tstt/tags/NAME/id_list"][()]
-        name_vals = f["tstt/tags/NAME/values"][()]
+        return _get_materials_from_h5py(f, remove_prefix)
 
-        materials_list = []
-        for eid, val in zip(name_ids, name_vals):
-            name = val.tobytes().decode("ascii").rstrip("\x00")
-            if name.startswith("mat:"):
-                if remove_prefix:
-                    materials_list.append(name[4:])
-                else:
-                    materials_list.append(name)
 
-        return sorted(set(materials_list))
+def _get_materials_from_h5py(
+    f: h5py.File, remove_prefix: bool, cache: Optional["_H5pyReadCache"] = None
+) -> List[str]:
+    """Get material names from an open h5py file."""
+    cache = cache or _H5pyReadCache(f)
+
+    materials_list = []
+    for name in cache.tag("NAME").values():
+        if isinstance(name, str) and name.startswith("mat:"):
+            materials_list.append(name[4:] if remove_prefix else name)
+
+    return sorted(set(materials_list))
 
 
 def _get_volumes_and_materials_h5py(
@@ -282,35 +365,35 @@ def _get_volumes_and_materials_h5py(
 ) -> Dict[int, str]:
     """Get volume-to-material mapping using h5py backend."""
     with h5py.File(filename, "r") as f:
-        sets = _read_sets_h5py(f)
-        categories = _read_tag_h5py(f, "CATEGORY")
-        names = _read_tag_h5py(f, "NAME")
-        geom_dim = _read_tag_h5py(f, "GEOM_DIMENSION")
+        return _get_volumes_and_materials_from_h5py(f, remove_prefix)
 
-        global_ids: Dict[int, int] = {}
-        sets_start_id = int(f["tstt/sets/list"].attrs["start_id"])
-        if "tstt/sets/tags/GLOBAL_ID" in f:
-            dense_gids = f["tstt/sets/tags/GLOBAL_ID"][...]
-            for idx, gid in enumerate(dense_gids):
-                global_ids[sets_start_id + idx] = int(gid)
-        else:
-            global_ids = _read_tag_h5py(f, "GLOBAL_ID")
 
-        volume_handles = {h for h, cat in categories.items() if cat == "Volume"}
-        volume_handles.update(h for h, dim in geom_dim.items() if dim == 3)
+def _get_volumes_and_materials_from_h5py(
+    f: h5py.File, remove_prefix: bool, cache: Optional["_H5pyReadCache"] = None
+) -> Dict[int, str]:
+    """Get volume-to-material mapping from an open h5py file."""
+    cache = cache or _H5pyReadCache(f)
+    sets = cache.sets
+    categories = cache.tag("CATEGORY")
+    names = cache.tag("NAME")
+    geom_dim = cache.tag("GEOM_DIMENSION")
+    global_ids = cache.set_global_ids
 
-        vol_mat: Dict[int, str] = {}
-        for set_info in sets:
-            material_name = names.get(set_info.handle, "")
-            if not material_name.startswith("mat:"):
-                continue
-            if remove_prefix:
-                material_name = material_name[4:]
-            for handle in _expand_set_contents(set_info):
-                if handle in volume_handles and handle in global_ids:
-                    vol_mat[global_ids[handle]] = material_name
+    volume_handles = {h for h, cat in categories.items() if cat == "Volume"}
+    volume_handles.update(h for h, dim in geom_dim.items() if dim == 3)
 
-        return {volume_id: vol_mat[volume_id] for volume_id in sorted(vol_mat)}
+    vol_mat: Dict[int, str] = {}
+    for set_info in sets:
+        material_name = names.get(set_info.handle, "")
+        if not material_name.startswith("mat:"):
+            continue
+        if remove_prefix:
+            material_name = material_name[4:]
+        for handle in _expand_set_contents(set_info):
+            if handle in volume_handles and handle in global_ids:
+                vol_mat[global_ids[handle]] = material_name
+
+    return {volume_id: vol_mat[volume_id] for volume_id in sorted(vol_mat)}
 
 
 def _get_cell_ids_by_group_name_h5py(filename: str) -> Dict[str, List[int]]:
@@ -513,6 +596,45 @@ def _read_tag_h5py(f: h5py.File, tag_name: str) -> Dict[int, object]:
             decoded[int(h)] = int(v) if np.issubdtype(values.dtype, np.integer) else v
 
     return decoded
+
+
+class _H5pyReadCache:
+    """Sets and tags decoded once and shared between readers of one open file.
+
+    The readers each need the same sets and tags, so a load that runs several
+    of them over one file would otherwise decode the same data repeatedly.
+    """
+
+    def __init__(self, f: h5py.File):
+        self._f = f
+        self._sets: Optional[List[_SetInfo]] = None
+        self._tags: Dict[str, Dict[int, object]] = {}
+        self._set_global_ids: Optional[Dict[int, int]] = None
+
+    @property
+    def sets(self) -> List[_SetInfo]:
+        if self._sets is None:
+            self._sets = _read_sets_h5py(self._f)
+        return self._sets
+
+    def tag(self, tag_name: str) -> Dict[int, object]:
+        if tag_name not in self._tags:
+            self._tags[tag_name] = _read_tag_h5py(self._f, tag_name)
+        return self._tags[tag_name]
+
+    @property
+    def set_global_ids(self) -> Dict[int, int]:
+        """GLOBAL_ID per set handle, from the dense table when the file has one."""
+        if self._set_global_ids is None:
+            if "tstt/sets/tags/GLOBAL_ID" in self._f:
+                start_id = int(self._f["tstt/sets/list"].attrs["start_id"])
+                dense_gids = self._f["tstt/sets/tags/GLOBAL_ID"][...]
+                self._set_global_ids = {
+                    start_id + idx: int(gid) for idx, gid in enumerate(dense_gids)
+                }
+            else:
+                self._set_global_ids = self.tag("GLOBAL_ID")
+        return self._set_global_ids
 
 
 def _read_geom_sense_h5py(f: h5py.File) -> Dict[int, Tuple[int, int]]:
@@ -999,20 +1121,19 @@ def _get_volumes_pymoab(filename: str) -> List[int]:
     import pymoab as mb
 
     mbcore = _load_moab_file(filename)
-    group_ents = _get_groups_pymoab(mbcore)
-    name_tag = mbcore.tag_get_handle(mb.types.NAME_TAG_NAME)
+    category_tag = mbcore.tag_get_handle(mb.types.CATEGORY_TAG_NAME)
     id_tag = mbcore.tag_get_handle(mb.types.GLOBAL_ID_TAG_NAME)
+
+    volume_ents = mbcore.get_entities_by_type_and_tag(
+        0, mb.types.MBENTITYSET, category_tag, ["Volume"]
+    )
+
     ids = []
+    for vol_ent in volume_ents:
+        vol_id = mbcore.tag_get_data(id_tag, vol_ent)[0][0]
+        ids.append(vol_id.item())
 
-    for group_ent in group_ents:
-        group_name = mbcore.tag_get_data(name_tag, group_ent)[0][0]
-        if group_name.startswith("mat:"):
-            vols = mbcore.get_entities_by_type(group_ent, mb.types.MBENTITYSET)
-            for vol in vols:
-                id = mbcore.tag_get_data(id_tag, vol)[0][0]
-                ids.append(id.item())
-
-    return sorted(set(list(ids)))
+    return sorted(set(ids))
 
 
 def _get_surfaces_pymoab(filename: str) -> List[int]:
@@ -1037,9 +1158,14 @@ def _get_surfaces_pymoab(filename: str) -> List[int]:
 
 def _get_materials_pymoab(filename: str, remove_prefix: bool) -> List[str]:
     """Get material names using pymoab backend."""
+    mbcore = _load_moab_file(filename)
+    return _get_materials_from_pymoab(mbcore, remove_prefix)
+
+
+def _get_materials_from_pymoab(mbcore: object, remove_prefix: bool) -> List[str]:
+    """Get material names from a loaded pymoab Core object."""
     import pymoab as mb
 
-    mbcore = _load_moab_file(filename)
     group_ents = _get_groups_pymoab(mbcore)
     name_tag = mbcore.tag_get_handle(mb.types.NAME_TAG_NAME)
 
@@ -1059,9 +1185,16 @@ def _get_volumes_and_materials_pymoab(
     filename: str, remove_prefix: bool
 ) -> Dict[int, str]:
     """Get volume-to-material mapping using pymoab backend."""
+    mbcore = _load_moab_file(filename)
+    return _get_volumes_and_materials_from_pymoab(mbcore, remove_prefix)
+
+
+def _get_volumes_and_materials_from_pymoab(
+    mbcore: object, remove_prefix: bool
+) -> Dict[int, str]:
+    """Get volume-to-material mapping from a loaded pymoab Core object."""
     import pymoab as mb
 
-    mbcore = _load_moab_file(filename)
     group_ents = _get_groups_pymoab(mbcore)
     name_tag = mbcore.tag_get_handle(mb.types.NAME_TAG_NAME)
     id_tag = mbcore.tag_get_handle(mb.types.GLOBAL_ID_TAG_NAME)
@@ -1078,7 +1211,9 @@ def _get_volumes_and_materials_pymoab(
                 else:
                     vol_mat[id] = group_name
 
-    return vol_mat
+    # ordered by volume id, as the h5py backend does, rather than by the group
+    # the volumes were found in
+    return {volume_id: vol_mat[volume_id] for volume_id in sorted(vol_mat)}
 
 
 def _get_cell_ids_by_group_name_pymoab(filename: str) -> Dict[str, List[int]]:
@@ -1144,97 +1279,128 @@ def _get_triangle_conn_and_coords_h5py(
     coordinates array for that volume.
     """
     with h5py.File(filename, "r") as f:
-        coords, node_start = _read_nodes_h5py(f)
-        tri_conn, tri_start = _read_tri3_connectivity_h5py(f)
-        tri_conn0 = tri_conn - node_start  # Convert to 0-based indexing
-        tri_end = tri_start + tri_conn.shape[0] - 1
+        return _get_triangle_conn_and_coords_from_h5py(f)
 
-        sets = _read_sets_h5py(f)
-        sets_by_handle = {s.handle: s for s in sets}
 
-        categories = _read_tag_h5py(f, "CATEGORY")
-        geom_dim = _read_tag_h5py(f, "GEOM_DIMENSION")
+def _get_volume_ids_from_h5py(f: h5py.File, cache: Optional["_H5pyReadCache"] = None):
+    """Get volume GLOBAL_IDs from an open h5py file, without reading triangles.
 
-        # Get GLOBAL_ID for sets
-        global_ids: Dict[int, int] = {}
-        sets_start_id = int(f["tstt/sets/list"].attrs["start_id"])
-        if "tstt/sets/tags/GLOBAL_ID" in f:
-            dense_gids = f["tstt/sets/tags/GLOBAL_ID"][...]
-            for idx, gid in enumerate(dense_gids):
-                handle = sets_start_id + idx
-                global_ids[handle] = int(gid)
+    Uses the same handles as the triangle reader so the ids stay in step with
+    the keys of the triangle data once that is read.
+    """
+    cache = cache or _H5pyReadCache(f)
+    categories = cache.tag("CATEGORY")
+    geom_dim = cache.tag("GEOM_DIMENSION")
+    global_ids = cache.set_global_ids
+
+    volume_handles = {h for h, cat in categories.items() if cat == "Volume"}
+    volume_handles.update(h for h, dim in geom_dim.items() if dim == 3)
+
+    return sorted(
+        {global_ids[handle] for handle in volume_handles if handle in global_ids}
+    )
+
+
+def _get_volume_ids_from_pymoab(mbcore: object) -> List[int]:
+    """Get volume GLOBAL_IDs from a loaded pymoab Core, without triangles."""
+    import pymoab as mb
+
+    category_tag = mbcore.tag_get_handle(mb.types.CATEGORY_TAG_NAME)
+    id_tag = mbcore.tag_get_handle(mb.types.GLOBAL_ID_TAG_NAME)
+
+    volume_ents = mbcore.get_entities_by_type_and_tag(
+        0, mb.types.MBENTITYSET, category_tag, ["Volume"]
+    )
+    return sorted(
+        {mbcore.tag_get_data(id_tag, vol)[0][0].item() for vol in volume_ents}
+    )
+
+
+def _get_triangle_conn_and_coords_from_h5py(
+    f: h5py.File, cache: Optional["_H5pyReadCache"] = None
+) -> Dict[int, Tuple[np.ndarray, np.ndarray]]:
+    """Get per-volume triangle data from an open h5py file."""
+    coords, node_start = _read_nodes_h5py(f)
+    tri_conn, tri_start = _read_tri3_connectivity_h5py(f)
+    tri_conn0 = tri_conn - node_start  # Convert to 0-based indexing
+    tri_end = tri_start + tri_conn.shape[0] - 1
+
+    cache = cache or _H5pyReadCache(f)
+    sets_by_handle = {s.handle: s for s in cache.sets}
+
+    categories = cache.tag("CATEGORY")
+    geom_dim = cache.tag("GEOM_DIMENSION")
+    global_ids = cache.set_global_ids
+
+    # Build set of surface handles
+    surface_handles = {h for h, cat in categories.items() if cat == "Surface"}
+    surface_handles.update(h for h, dim in geom_dim.items() if dim == 2)
+
+    # Build set of volume handles
+    volume_handles = {h for h, cat in categories.items() if cat == "Volume"}
+    volume_handles.update(h for h, dim in geom_dim.items() if dim == 3)
+
+    result: Dict[int, Tuple[np.ndarray, np.ndarray]] = {}
+
+    for vol_handle in volume_handles:
+        vol_gid = global_ids.get(vol_handle)
+        if vol_gid is None:
+            continue
+
+        volume_set = sets_by_handle.get(vol_handle)
+        if volume_set is None:
+            continue
+
+        # Get child surfaces of this volume
+        if volume_set.children:
+            surfaces = [h for h in volume_set.children if h in surface_handles]
         else:
-            global_ids = _read_tag_h5py(f, "GLOBAL_ID")
+            # Fallback: find surfaces that reference this volume
+            surfaces = list(surface_handles)
 
-        # Build set of surface handles
-        surface_handles = {h for h, cat in categories.items() if cat == "Surface"}
-        surface_handles.update(h for h, dim in geom_dim.items() if dim == 2)
-
-        # Build set of volume handles
-        volume_handles = {h for h, cat in categories.items() if cat == "Volume"}
-        volume_handles.update(h for h, dim in geom_dim.items() if dim == 3)
-
-        result: Dict[int, Tuple[np.ndarray, np.ndarray]] = {}
-
-        for vol_handle in volume_handles:
-            vol_gid = global_ids.get(vol_handle)
-            if vol_gid is None:
+        # Collect all triangle indices for this volume
+        all_tri_indices: List[int] = []
+        for surf_handle in surfaces:
+            surf_set = sets_by_handle.get(surf_handle)
+            if surf_set is None:
                 continue
 
-            volume_set = sets_by_handle.get(vol_handle)
-            if volume_set is None:
-                continue
-
-            # Get child surfaces of this volume
-            if volume_set.children:
-                surfaces = [h for h in volume_set.children if h in surface_handles]
-            else:
-                # Fallback: find surfaces that reference this volume
-                surfaces = list(surface_handles)
-
-            # Collect all triangle indices for this volume
-            all_tri_indices: List[int] = []
-            for surf_handle in surfaces:
-                surf_set = sets_by_handle.get(surf_handle)
-                if surf_set is None:
-                    continue
-
-                tri_indices = _tri_indices_for_set(
-                    surf_set,
-                    tri_start=tri_start,
-                    tri_end=tri_end,
-                )
-                all_tri_indices.extend(tri_indices.tolist())
-
-            if not all_tri_indices:
-                # Empty volume
-                result[int(vol_gid)] = (
-                    np.array([], dtype=np.int64).reshape(0, 3),
-                    np.array([], dtype=np.float64).reshape(0, 3),
-                )
-                continue
-
-            all_tri_indices = np.array(all_tri_indices, dtype=np.int64)
-
-            # Get the triangles for this volume
-            volume_tris = tri_conn0[all_tri_indices]
-
-            # Find unique vertex indices and create local indexing
-            unique_verts = np.unique(volume_tris)
-            vert_to_local = {v: i for i, v in enumerate(unique_verts)}
-
-            # Extract coordinates for these vertices
-            volume_coords = coords[unique_verts]
-
-            # Re-index connectivity to be 0-based relative to volume_coords
-            local_conn = np.array(
-                [[vert_to_local[v] for v in tri] for tri in volume_tris],
-                dtype=np.int64,
+            tri_indices = _tri_indices_for_set(
+                surf_set,
+                tri_start=tri_start,
+                tri_end=tri_end,
             )
+            all_tri_indices.extend(tri_indices.tolist())
 
-            result[int(vol_gid)] = (local_conn, volume_coords)
+        if not all_tri_indices:
+            # Empty volume
+            result[int(vol_gid)] = (
+                np.array([], dtype=np.int64).reshape(0, 3),
+                np.array([], dtype=np.float64).reshape(0, 3),
+            )
+            continue
 
-        return result
+        all_tri_indices_array = np.array(all_tri_indices, dtype=np.int64)
+
+        # Get the triangles for this volume
+        volume_tris = tri_conn0[all_tri_indices_array]
+
+        # Find unique vertex indices and create local indexing
+        unique_verts = np.unique(volume_tris)
+        vert_to_local = {v: i for i, v in enumerate(unique_verts)}
+
+        # Extract coordinates for these vertices
+        volume_coords = coords[unique_verts]
+
+        # Re-index connectivity to be 0-based relative to volume_coords
+        local_conn = np.array(
+            [[vert_to_local[v] for v in tri] for tri in volume_tris],
+            dtype=np.int64,
+        )
+
+        result[int(vol_gid)] = (local_conn, volume_coords)
+
+    return result
 
 
 def _write_h5m(
@@ -1591,81 +1757,6 @@ def _write_h5m(
         tstt.attrs.create("max_id", np.uint64(global_id - 1))
 
 
-def _remove_materials_h5py(
-    input_filename: str,
-    output_filename: str,
-    materials_to_remove: List[str],
-) -> List[str]:
-    """Remove materials using h5py backend (read-filter-write approach)."""
-    vol_mat = get_volumes_and_materials(
-        filename=input_filename, remove_prefix=True, backend="h5py"
-    )
-    all_materials = sorted(set(vol_mat.values()))
-    matched = sorted(set(materials_to_remove) & set(all_materials))
-    if not matched:
-        raise ValueError(
-            f"None of the specified materials {materials_to_remove} found in "
-            f"{input_filename}. Available materials: {all_materials}"
-        )
-
-    vol_data = get_triangle_conn_and_coords_by_volume(
-        filename=input_filename, backend="h5py"
-    )
-
-    keep_vols = {
-        vid: mat for vid, mat in vol_mat.items() if mat not in materials_to_remove
-    }
-
-    if not keep_vols:
-        # All volumes removed — write an empty-ish file
-        _write_h5m(output_filename, {}, {})
-    else:
-        keep_data = {vid: vol_data[vid] for vid in keep_vols}
-        _write_h5m(output_filename, keep_data, keep_vols)
-
-    return matched
-
-
-def _remove_materials_pymoab(
-    input_filename: str,
-    output_filename: str,
-    materials_to_remove: List[str],
-) -> List[str]:
-    """Remove materials using pymoab backend.
-
-    Uses the same read-filter-write approach as the h5py backend: reads the
-    data, filters out unwanted volumes, and writes a fresh file using
-    ``_write_h5m``.  This avoids issues with pymoab's ``write_file`` when
-    all groups are removed.
-    """
-    vol_mat = get_volumes_and_materials(
-        filename=input_filename, remove_prefix=True, backend="pymoab"
-    )
-    all_materials = sorted(set(vol_mat.values()))
-    matched = sorted(set(materials_to_remove) & set(all_materials))
-    if not matched:
-        raise ValueError(
-            f"None of the specified materials {materials_to_remove} found in "
-            f"{input_filename}. Available materials: {all_materials}"
-        )
-
-    vol_data = get_triangle_conn_and_coords_by_volume(
-        filename=input_filename, backend="pymoab"
-    )
-
-    keep_vols = {
-        vid: mat for vid, mat in vol_mat.items() if mat not in materials_to_remove
-    }
-
-    if not keep_vols:
-        _write_h5m(output_filename, {}, {})
-    else:
-        keep_data = {vid: vol_data[vid] for vid in keep_vols}
-        _write_h5m(output_filename, keep_data, keep_vols)
-
-    return matched
-
-
 def _get_triangle_conn_and_coords_pymoab(
     filename: str,
 ) -> Dict[int, Tuple[np.ndarray, np.ndarray]]:
@@ -1676,9 +1767,16 @@ def _get_triangle_conn_and_coords_pymoab(
     array of 3D points. The connectivity indices are 0-based relative to the
     coordinates array for that volume.
     """
+    mbcore = _load_moab_file(filename)
+    return _get_triangle_conn_and_coords_from_pymoab(mbcore)
+
+
+def _get_triangle_conn_and_coords_from_pymoab(
+    mbcore: object,
+) -> Dict[int, Tuple[np.ndarray, np.ndarray]]:
+    """Get per-volume triangle data from a loaded pymoab Core object."""
     import pymoab as mb
 
-    mbcore = _load_moab_file(filename)
     category_tag = mbcore.tag_get_handle(mb.types.CATEGORY_TAG_NAME)
     id_tag = mbcore.tag_get_handle(mb.types.GLOBAL_ID_TAG_NAME)
 
@@ -1729,6 +1827,64 @@ def _get_triangle_conn_and_coords_pymoab(
         result[vol_gid] = (local_conn, volume_coords)
 
     return result
+
+
+def _load_dagmc_data(
+    filename: str,
+    backend: Literal["h5py", "pymoab"] = "h5py",
+) -> _DAGMCData:
+    """Load mutable geometry and material data with one backend load."""
+    _validate_backend(backend)
+    if not Path(filename).is_file():
+        raise FileNotFoundError(f"filename provided ({filename}) does not exist")
+
+    if backend == "pymoab":
+        _check_pymoab_available()
+
+        # loading a Core is the expensive part for this backend, so the first
+        # reader to need one keeps it for the second
+        loaded_core = []
+
+        def moab_core():
+            if not loaded_core:
+                loaded_core.append(_load_moab_file(filename))
+            return loaded_core[0]
+
+        def load_pymoab_metadata():
+            mbcore = moab_core()
+            return (
+                _get_volume_ids_from_pymoab(mbcore),
+                _get_volumes_and_materials_from_pymoab(mbcore, remove_prefix=True),
+                _get_materials_from_pymoab(mbcore, remove_prefix=True),
+            )
+
+        def load_pymoab_volume_data():
+            return _get_triangle_conn_and_coords_from_pymoab(moab_core())
+
+        return _DAGMCData(
+            metadata_loader=load_pymoab_metadata,
+            volume_data_loader=load_pymoab_volume_data,
+        )
+
+    def load_h5py_metadata():
+        with h5py.File(filename, "r") as f:
+            cache = _H5pyReadCache(f)
+            return (
+                _get_volume_ids_from_h5py(f, cache=cache),
+                _get_volumes_and_materials_from_h5py(
+                    f, remove_prefix=True, cache=cache
+                ),
+                _get_materials_from_h5py(f, remove_prefix=True, cache=cache),
+            )
+
+    def load_h5py_volume_data():
+        with h5py.File(filename, "r") as f:
+            return _get_triangle_conn_and_coords_from_h5py(f)
+
+    return _DAGMCData(
+        metadata_loader=load_h5py_metadata,
+        volume_data_loader=load_h5py_volume_data,
+    )
 
 
 def _get_volumes_sizes_pymoab(filename: str) -> Dict[int, float]:
@@ -2785,19 +2941,12 @@ def remove_materials(
         FileNotFoundError: If *input_filename* does not exist.
         ValueError: If none of the specified materials are found in the file.
     """
-    _validate_backend(backend)
-    if not Path(input_filename).is_file():
-        raise FileNotFoundError(f"filename provided ({input_filename}) does not exist")
+    from .dagmc_file import DAGMCFile
 
-    if isinstance(materials_to_remove, str):
-        materials_to_remove = [materials_to_remove]
-
-    if backend == "pymoab":
-        _check_pymoab_available()
-        return _remove_materials_pymoab(
-            input_filename, output_filename, materials_to_remove
-        )
-    return _remove_materials_h5py(input_filename, output_filename, materials_to_remove)
+    dagmc_file = DAGMCFile(input_filename, backend=backend)
+    removed = dagmc_file.remove_materials(materials_to_remove)
+    dagmc_file.write(output_filename)
+    return removed
 
 
 def remove_volumes(
@@ -2824,42 +2973,12 @@ def remove_volumes(
         FileNotFoundError: If *input_filename* does not exist.
         ValueError: If none of the specified volume IDs are found in the file.
     """
-    _validate_backend(backend)
-    if not Path(input_filename).is_file():
-        raise FileNotFoundError(f"filename provided ({input_filename}) does not exist")
+    from .dagmc_file import DAGMCFile
 
-    if isinstance(volume_ids_to_remove, int):
-        volume_ids_to_remove = [volume_ids_to_remove]
-
-    if backend == "pymoab":
-        _check_pymoab_available()
-
-    vol_mat = get_volumes_and_materials(
-        filename=input_filename,
-        remove_prefix=True,
-        backend=backend,
-    )
-    available_volume_ids = sorted(vol_mat)
-    matched = sorted(set(volume_ids_to_remove) & set(available_volume_ids))
-    if not matched:
-        raise ValueError(
-            f"None of the specified volume IDs {volume_ids_to_remove} found in "
-            f"{input_filename}. Available volume IDs: {available_volume_ids}"
-        )
-
-    vol_data = get_triangle_conn_and_coords_by_volume(
-        filename=input_filename,
-        backend=backend,
-    )
-    keep_vol_mat = {
-        volume_id: material
-        for volume_id, material in vol_mat.items()
-        if volume_id not in volume_ids_to_remove
-    }
-    keep_vol_data = {volume_id: vol_data[volume_id] for volume_id in keep_vol_mat}
-
-    _write_h5m(output_filename, keep_vol_data, keep_vol_mat)
-    return matched
+    dagmc_file = DAGMCFile(input_filename, backend=backend)
+    removed = dagmc_file.remove_volumes(volume_ids_to_remove)
+    dagmc_file.write(output_filename)
+    return removed
 
 
 def _rotation_matrix(axis: str, degrees: float) -> np.ndarray:
@@ -2938,19 +3057,11 @@ def rotate_around_axis(
     if backend == "pymoab":
         _check_pymoab_available()
 
-    vol_mat = get_volumes_and_materials(
-        filename=filename, remove_prefix=True, backend=backend
-    )
-    vol_data = get_triangle_conn_and_coords_by_volume(
-        filename=filename, backend=backend
-    )
+    from .dagmc_file import DAGMCFile
 
-    R = _rotation_matrix(axis, degrees)
-    rotated_data = {}
-    for vid, (conn, coords) in vol_data.items():
-        rotated_data[vid] = (conn, coords @ R.T)
-
-    _write_h5m(output, rotated_data, vol_mat)
+    dagmc_file = DAGMCFile(filename, backend=backend)
+    dagmc_file.rotate_around_axis(axis=axis, degrees=degrees)
+    dagmc_file.write(output)
     return output
 
 
@@ -2984,26 +3095,11 @@ def move(
         >>> di.move("dagmc.h5m", x=10.0, y=0.0, z=0.0)
         'dagmc_moved.h5m'
     """
-    _validate_backend(backend)
-    if not Path(filename).is_file():
-        raise FileNotFoundError(f"filename provided ({filename}) does not exist")
+    from .dagmc_file import DAGMCFile
 
-    if backend == "pymoab":
-        _check_pymoab_available()
-
-    vol_mat = get_volumes_and_materials(
-        filename=filename, remove_prefix=True, backend=backend
-    )
-    vol_data = get_triangle_conn_and_coords_by_volume(
-        filename=filename, backend=backend
-    )
-
-    offset = np.array([x, y, z])
-    moved_data = {}
-    for vid, (conn, coords) in vol_data.items():
-        moved_data[vid] = (conn, coords + offset)
-
-    _write_h5m(output, moved_data, vol_mat)
+    dagmc_file = DAGMCFile(filename, backend=backend)
+    dagmc_file.move(x=x, y=y, z=z)
+    dagmc_file.write(output)
     return output
 
 
@@ -3052,16 +3148,18 @@ def combine_h5m_files(
     next_vol_id = 1
 
     for filepath in input_files:
-        vol_mat = get_volumes_and_materials(
-            filename=filepath, remove_prefix=True, backend=backend
-        )
-        vol_data = get_triangle_conn_and_coords_by_volume(
-            filename=filepath, backend=backend
-        )
+        data = _load_dagmc_data(filepath, backend=backend)
 
-        for old_vid in sorted(vol_data.keys()):
-            combined_vol_data[next_vol_id] = vol_data[old_vid]
-            combined_vol_mat[next_vol_id] = vol_mat[old_vid]
+        orphans = sorted(set(data.volume_data) - set(data.volume_materials))
+        if orphans:
+            raise ValueError(
+                f"Cannot combine {filepath}: volumes {orphans} have no material "
+                "group. Assign a material or remove these volumes."
+            )
+
+        for old_vid in sorted(data.volume_data):
+            combined_vol_data[next_vol_id] = data.volume_data[old_vid]
+            combined_vol_mat[next_vol_id] = data.volume_materials[old_vid]
             next_vol_id += 1
 
     _write_h5m(output_file, combined_vol_data, combined_vol_mat)
