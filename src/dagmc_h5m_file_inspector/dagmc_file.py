@@ -78,6 +78,15 @@ class DAGMCFile:
         if isinstance(materials, str):
             materials = [materials]
 
+        if (
+            materials is None
+            and not self._modified
+            and not self._data.volume_data_loaded
+        ):
+            # the box over everything only needs the coordinate block, which
+            # the file reader takes in one piece rather than per volume
+            return core.get_bounding_box(self.filename, backend=self.backend)
+
         if materials is None:
             volume_ids = self.get_volumes()
         else:

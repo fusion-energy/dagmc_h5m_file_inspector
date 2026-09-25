@@ -41,16 +41,58 @@ class _DAGMCData:
 
     def __init__(
         self,
-        volume_ids: List[int],
-        volume_materials: Dict[int, str],
-        materials: List[str],
+        metadata_loader: Callable[[], Tuple[List[int], Dict[int, str], List[str]]],
         volume_data_loader: Callable[[], Dict[int, Tuple[np.ndarray, np.ndarray]]],
     ) -> None:
-        self.volume_ids = list(volume_ids)
-        self.volume_materials = volume_materials
-        self.materials = materials
+        self._metadata_loader = metadata_loader
         self._volume_data_loader = volume_data_loader
+        self._volume_ids: Optional[List[int]] = None
+        self._volume_materials: Optional[Dict[int, str]] = None
+        self._materials: Optional[List[str]] = None
         self._volume_data: Optional[Dict[int, Tuple[np.ndarray, np.ndarray]]] = None
+
+    def _ensure_metadata(self) -> None:
+        """Read the volume ids and materials if they have not been read yet."""
+        if self._volume_ids is None:
+            volume_ids, volume_materials, materials = self._metadata_loader()
+            self._volume_ids = list(volume_ids)
+            self._volume_materials = volume_materials
+            self._materials = materials
+
+    @property
+    def metadata_loaded(self) -> bool:
+        """Whether the volume ids and materials have been read yet."""
+        return self._volume_ids is not None
+
+    @property
+    def volume_ids(self) -> List[int]:
+        self._ensure_metadata()
+        return self._volume_ids
+
+    @volume_ids.setter
+    def volume_ids(self, value: List[int]) -> None:
+        self._ensure_metadata()
+        self._volume_ids = value
+
+    @property
+    def volume_materials(self) -> Dict[int, str]:
+        self._ensure_metadata()
+        return self._volume_materials
+
+    @volume_materials.setter
+    def volume_materials(self, value: Dict[int, str]) -> None:
+        self._ensure_metadata()
+        self._volume_materials = value
+
+    @property
+    def materials(self) -> List[str]:
+        self._ensure_metadata()
+        return self._materials
+
+    @materials.setter
+    def materials(self, value: List[str]) -> None:
+        self._ensure_metadata()
+        self._materials = value
 
     @property
     def volume_data(self) -> Dict[int, Tuple[np.ndarray, np.ndarray]]:
@@ -1798,36 +1840,51 @@ def _load_dagmc_data(
 
     if backend == "pymoab":
         _check_pymoab_available()
-        mbcore = _load_moab_file(filename)
+
+        # loading a Core is the expensive part for this backend, so the first
+        # reader to need one keeps it for the second
+        loaded_core = []
+
+        def moab_core():
+            if not loaded_core:
+                loaded_core.append(_load_moab_file(filename))
+            return loaded_core[0]
+
+        def load_pymoab_metadata():
+            mbcore = moab_core()
+            return (
+                _get_volume_ids_from_pymoab(mbcore),
+                _get_volumes_and_materials_from_pymoab(mbcore, remove_prefix=True),
+                _get_materials_from_pymoab(mbcore, remove_prefix=True),
+            )
 
         def load_pymoab_volume_data():
-            # the Core is still held by this closure, so no reload is needed
-            return _get_triangle_conn_and_coords_from_pymoab(mbcore)
+            return _get_triangle_conn_and_coords_from_pymoab(moab_core())
 
         return _DAGMCData(
-            volume_ids=_get_volume_ids_from_pymoab(mbcore),
-            volume_materials=_get_volumes_and_materials_from_pymoab(
-                mbcore, remove_prefix=True
-            ),
-            materials=_get_materials_from_pymoab(mbcore, remove_prefix=True),
+            metadata_loader=load_pymoab_metadata,
             volume_data_loader=load_pymoab_volume_data,
         )
 
-    def load_h5py_volume_data():
-        # the file from the metadata read is closed by now, so reopen it
-        with h5py.File(filename, "r") as triangle_file:
-            return _get_triangle_conn_and_coords_from_h5py(triangle_file)
+    def load_h5py_metadata():
+        with h5py.File(filename, "r") as f:
+            cache = _H5pyReadCache(f)
+            return (
+                _get_volume_ids_from_h5py(f, cache=cache),
+                _get_volumes_and_materials_from_h5py(
+                    f, remove_prefix=True, cache=cache
+                ),
+                _get_materials_from_h5py(f, remove_prefix=True, cache=cache),
+            )
 
-    with h5py.File(filename, "r") as f:
-        cache = _H5pyReadCache(f)
-        return _DAGMCData(
-            volume_ids=_get_volume_ids_from_h5py(f, cache=cache),
-            volume_materials=_get_volumes_and_materials_from_h5py(
-                f, remove_prefix=True, cache=cache
-            ),
-            materials=_get_materials_from_h5py(f, remove_prefix=True, cache=cache),
-            volume_data_loader=load_h5py_volume_data,
-        )
+    def load_h5py_volume_data():
+        with h5py.File(filename, "r") as f:
+            return _get_triangle_conn_and_coords_from_h5py(f)
+
+    return _DAGMCData(
+        metadata_loader=load_h5py_metadata,
+        volume_data_loader=load_h5py_volume_data,
+    )
 
 
 def _get_volumes_sizes_pymoab(filename: str) -> Dict[int, float]:
