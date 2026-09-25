@@ -96,7 +96,8 @@ class DAGMCFile:
         coordinates = [
             self._data.volume_data[volume_id][1]
             for volume_id in volume_ids
-            if self._data.volume_data[volume_id][1].size > 0
+            if volume_id in self._data.volume_data
+            and self._data.volume_data[volume_id][1].size > 0
         ]
         if not coordinates:
             raise ValueError(f"No triangle data found in {self.filename}")
@@ -109,7 +110,7 @@ class DAGMCFile:
 
     def get_materials(self, remove_prefix: bool = True) -> List[str]:
         """Return the sorted material tags in the loaded file."""
-        materials = sorted(set(self._data.volume_materials.values()))
+        materials = sorted(set(self._data.materials))
         if remove_prefix:
             return materials
         return [f"mat:{material}" for material in materials]
@@ -246,6 +247,9 @@ class DAGMCFile:
             self._data.volume_data.pop(volume_id, None)
             self._data.volume_materials.pop(volume_id, None)
 
+        removed = set(matched)
+        self._data.materials = [m for m in self._data.materials if m not in removed]
+
         self._modified = True
         return matched
 
@@ -262,9 +266,15 @@ class DAGMCFile:
                 f"{self.filename}. Available volume IDs: {available_volume_ids}"
             )
 
+        used_before = set(self._data.volume_materials.values())
         for volume_id in matched:
             self._data.volume_data.pop(volume_id, None)
             self._data.volume_materials.pop(volume_id, None)
+        used_after = set(self._data.volume_materials.values())
+
+        self._data.materials = [
+            m for m in self._data.materials if m in used_after or m not in used_before
+        ]
 
         self._modified = True
         return matched
@@ -312,6 +322,12 @@ class DAGMCFile:
 
     def write(self, output_filename: str) -> str:
         """Write the current in-memory geometry and materials to an h5m file."""
+        orphans = sorted(set(self._data.volume_data) - set(self._data.volume_materials))
+        if orphans:
+            raise ValueError(
+                f"Cannot write {output_filename}: volumes {orphans} have no "
+                "material group. Assign a material or remove these volumes."
+            )
         _write_h5m(
             output_filename,
             self._data.volume_data,

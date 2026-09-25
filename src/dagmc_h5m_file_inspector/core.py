@@ -36,6 +36,7 @@ class _DAGMCData:
 
     volume_data: Dict[int, Tuple[np.ndarray, np.ndarray]]
     volume_materials: Dict[int, str]
+    materials: List[str]
 
 
 # This is a reimplementation of the BoundingBox class that is mainly
@@ -270,19 +271,24 @@ def _get_surfaces_h5py(filename: str) -> List[int]:
 def _get_materials_h5py(filename: str, remove_prefix: bool) -> List[str]:
     """Get material names using h5py backend."""
     with h5py.File(filename, "r") as f:
-        name_ids = f["tstt/tags/NAME/id_list"][()]
-        name_vals = f["tstt/tags/NAME/values"][()]
+        return _get_materials_from_h5py(f, remove_prefix)
 
-        materials_list = []
-        for eid, val in zip(name_ids, name_vals):
-            name = val.tobytes().decode("ascii").rstrip("\x00")
-            if name.startswith("mat:"):
-                if remove_prefix:
-                    materials_list.append(name[4:])
-                else:
-                    materials_list.append(name)
 
-        return sorted(set(materials_list))
+def _get_materials_from_h5py(f: h5py.File, remove_prefix: bool) -> List[str]:
+    """Get material names from an open h5py file."""
+    name_ids = f["tstt/tags/NAME/id_list"][()]
+    name_vals = f["tstt/tags/NAME/values"][()]
+
+    materials_list = []
+    for eid, val in zip(name_ids, name_vals):
+        name = val.tobytes().decode("ascii").rstrip("\x00")
+        if name.startswith("mat:"):
+            if remove_prefix:
+                materials_list.append(name[4:])
+            else:
+                materials_list.append(name)
+
+    return sorted(set(materials_list))
 
 
 def _get_volumes_and_materials_h5py(
@@ -1014,20 +1020,19 @@ def _get_volumes_pymoab(filename: str) -> List[int]:
     import pymoab as mb
 
     mbcore = _load_moab_file(filename)
-    group_ents = _get_groups_pymoab(mbcore)
-    name_tag = mbcore.tag_get_handle(mb.types.NAME_TAG_NAME)
+    category_tag = mbcore.tag_get_handle(mb.types.CATEGORY_TAG_NAME)
     id_tag = mbcore.tag_get_handle(mb.types.GLOBAL_ID_TAG_NAME)
+
+    volume_ents = mbcore.get_entities_by_type_and_tag(
+        0, mb.types.MBENTITYSET, category_tag, ["Volume"]
+    )
+
     ids = []
+    for vol_ent in volume_ents:
+        vol_id = mbcore.tag_get_data(id_tag, vol_ent)[0][0]
+        ids.append(vol_id.item())
 
-    for group_ent in group_ents:
-        group_name = mbcore.tag_get_data(name_tag, group_ent)[0][0]
-        if group_name.startswith("mat:"):
-            vols = mbcore.get_entities_by_type(group_ent, mb.types.MBENTITYSET)
-            for vol in vols:
-                id = mbcore.tag_get_data(id_tag, vol)[0][0]
-                ids.append(id.item())
-
-    return sorted(set(list(ids)))
+    return sorted(set(ids))
 
 
 def _get_surfaces_pymoab(filename: str) -> List[int]:
@@ -1052,9 +1057,14 @@ def _get_surfaces_pymoab(filename: str) -> List[int]:
 
 def _get_materials_pymoab(filename: str, remove_prefix: bool) -> List[str]:
     """Get material names using pymoab backend."""
+    mbcore = _load_moab_file(filename)
+    return _get_materials_from_pymoab(mbcore, remove_prefix)
+
+
+def _get_materials_from_pymoab(mbcore: object, remove_prefix: bool) -> List[str]:
+    """Get material names from a loaded pymoab Core object."""
     import pymoab as mb
 
-    mbcore = _load_moab_file(filename)
     group_ents = _get_groups_pymoab(mbcore)
     name_tag = mbcore.tag_get_handle(mb.types.NAME_TAG_NAME)
 
@@ -1709,6 +1719,7 @@ def _load_dagmc_data(
             volume_materials=_get_volumes_and_materials_from_pymoab(
                 mbcore, remove_prefix=True
             ),
+            materials=_get_materials_from_pymoab(mbcore, remove_prefix=True),
         )
 
     with h5py.File(filename, "r") as f:
@@ -1717,6 +1728,7 @@ def _load_dagmc_data(
             volume_materials=_get_volumes_and_materials_from_h5py(
                 f, remove_prefix=True
             ),
+            materials=_get_materials_from_h5py(f, remove_prefix=True),
         )
 
 
