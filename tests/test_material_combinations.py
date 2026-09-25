@@ -216,3 +216,57 @@ def test_bounding_box_ignores_a_material_with_no_volumes(
 
     with pytest.raises(ValueError, match="No volumes found for materials"):
         model.get_bounding_box(materials="mat_unused")
+
+
+@pytest.mark.parametrize("backend", BACKENDS)
+def test_combine_renumbers_volumes_across_shared_materials(
+    two_material_boxes, three_material_boxes, backend, tmp_path
+):
+    """Combining should keep every volume and carry its material over."""
+    output = str(tmp_path / "combined.h5m")
+    di.combine_h5m_files(
+        [two_material_boxes["filename"], three_material_boxes["filename"]],
+        output,
+        backend=backend,
+    )
+
+    combined = di.DAGMCFile(output, backend=backend)
+    assert combined.get_volumes() == [1, 2, 3, 4, 5, 6, 7]
+
+    expected = list(two_material_boxes["volumes_and_materials"].values())
+    expected += list(three_material_boxes["volumes_and_materials"].values())
+    assert list(combined.get_volumes_and_materials().values()) == expected
+
+
+@pytest.mark.parametrize("backend", BACKENDS)
+def test_combine_rejects_a_volume_with_no_material_group(
+    orphan_volume_boxes, three_material_boxes, backend, tmp_path
+):
+    """The writer needs a material per volume, so name the offending volumes
+    rather than failing with a KeyError from inside it."""
+    output = str(tmp_path / "combined.h5m")
+
+    with pytest.raises(ValueError, match="have no material group"):
+        di.combine_h5m_files(
+            [three_material_boxes["filename"], orphan_volume_boxes["filename"]],
+            output,
+            backend=backend,
+        )
+
+
+@pytest.mark.parametrize("geometry", WRITABLE_FIXTURES, indirect=True)
+def test_volumes_and_materials_is_ordered_by_volume_id(geometry, tmp_path):
+    """Both backends order the mapping by volume id rather than by the group a
+    volume was found in.
+
+    A written file lays its groups out in material order, so volumes sharing a
+    material end up adjacent on disk. That layout is what tells the two
+    orderings apart, hence the round trip before the check.
+    """
+    round_tripped = str(tmp_path / "ordered.h5m")
+    di.DAGMCFile(geometry["filename"]).write(round_tripped)
+
+    for filename in (geometry["filename"], round_tripped):
+        for backend in BACKENDS:
+            mapping = di.get_volumes_and_materials(filename, backend=backend)
+            assert list(mapping) == sorted(mapping)

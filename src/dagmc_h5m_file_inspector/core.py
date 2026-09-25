@@ -274,19 +274,16 @@ def _get_materials_h5py(filename: str, remove_prefix: bool) -> List[str]:
         return _get_materials_from_h5py(f, remove_prefix)
 
 
-def _get_materials_from_h5py(f: h5py.File, remove_prefix: bool) -> List[str]:
+def _get_materials_from_h5py(
+    f: h5py.File, remove_prefix: bool, cache: Optional["_H5pyReadCache"] = None
+) -> List[str]:
     """Get material names from an open h5py file."""
-    name_ids = f["tstt/tags/NAME/id_list"][()]
-    name_vals = f["tstt/tags/NAME/values"][()]
+    cache = cache or _H5pyReadCache(f)
 
     materials_list = []
-    for eid, val in zip(name_ids, name_vals):
-        name = val.tobytes().decode("ascii").rstrip("\x00")
-        if name.startswith("mat:"):
-            if remove_prefix:
-                materials_list.append(name[4:])
-            else:
-                materials_list.append(name)
+    for name in cache.tag("NAME").values():
+        if isinstance(name, str) and name.startswith("mat:"):
+            materials_list.append(name[4:] if remove_prefix else name)
 
     return sorted(set(materials_list))
 
@@ -300,22 +297,15 @@ def _get_volumes_and_materials_h5py(
 
 
 def _get_volumes_and_materials_from_h5py(
-    f: h5py.File, remove_prefix: bool
+    f: h5py.File, remove_prefix: bool, cache: Optional["_H5pyReadCache"] = None
 ) -> Dict[int, str]:
     """Get volume-to-material mapping from an open h5py file."""
-    sets = _read_sets_h5py(f)
-    categories = _read_tag_h5py(f, "CATEGORY")
-    names = _read_tag_h5py(f, "NAME")
-    geom_dim = _read_tag_h5py(f, "GEOM_DIMENSION")
-
-    global_ids: Dict[int, int] = {}
-    sets_start_id = int(f["tstt/sets/list"].attrs["start_id"])
-    if "tstt/sets/tags/GLOBAL_ID" in f:
-        dense_gids = f["tstt/sets/tags/GLOBAL_ID"][...]
-        for idx, gid in enumerate(dense_gids):
-            global_ids[sets_start_id + idx] = int(gid)
-    else:
-        global_ids = _read_tag_h5py(f, "GLOBAL_ID")
+    cache = cache or _H5pyReadCache(f)
+    sets = cache.sets
+    categories = cache.tag("CATEGORY")
+    names = cache.tag("NAME")
+    geom_dim = cache.tag("GEOM_DIMENSION")
+    global_ids = cache.set_global_ids
 
     volume_handles = {h for h, cat in categories.items() if cat == "Volume"}
     volume_handles.update(h for h, dim in geom_dim.items() if dim == 3)
@@ -534,6 +524,45 @@ def _read_tag_h5py(f: h5py.File, tag_name: str) -> Dict[int, object]:
             decoded[int(h)] = int(v) if np.issubdtype(values.dtype, np.integer) else v
 
     return decoded
+
+
+class _H5pyReadCache:
+    """Sets and tags decoded once and shared between readers of one open file.
+
+    The readers each need the same sets and tags, so a load that runs several
+    of them over one file would otherwise decode the same data repeatedly.
+    """
+
+    def __init__(self, f: h5py.File):
+        self._f = f
+        self._sets: Optional[List[_SetInfo]] = None
+        self._tags: Dict[str, Dict[int, object]] = {}
+        self._set_global_ids: Optional[Dict[int, int]] = None
+
+    @property
+    def sets(self) -> List[_SetInfo]:
+        if self._sets is None:
+            self._sets = _read_sets_h5py(self._f)
+        return self._sets
+
+    def tag(self, tag_name: str) -> Dict[int, object]:
+        if tag_name not in self._tags:
+            self._tags[tag_name] = _read_tag_h5py(self._f, tag_name)
+        return self._tags[tag_name]
+
+    @property
+    def set_global_ids(self) -> Dict[int, int]:
+        """GLOBAL_ID per set handle, from the dense table when the file has one."""
+        if self._set_global_ids is None:
+            if "tstt/sets/tags/GLOBAL_ID" in self._f:
+                start_id = int(self._f["tstt/sets/list"].attrs["start_id"])
+                dense_gids = self._f["tstt/sets/tags/GLOBAL_ID"][...]
+                self._set_global_ids = {
+                    start_id + idx: int(gid) for idx, gid in enumerate(dense_gids)
+                }
+            else:
+                self._set_global_ids = self.tag("GLOBAL_ID")
+        return self._set_global_ids
 
 
 def _read_geom_sense_h5py(f: h5py.File) -> Dict[int, Tuple[int, int]]:
@@ -1110,7 +1139,9 @@ def _get_volumes_and_materials_from_pymoab(
                 else:
                     vol_mat[id] = group_name
 
-    return vol_mat
+    # ordered by volume id, as the h5py backend does, rather than by the group
+    # the volumes were found in
+    return {volume_id: vol_mat[volume_id] for volume_id in sorted(vol_mat)}
 
 
 def _get_cell_ids_by_group_name_pymoab(filename: str) -> Dict[str, List[int]]:
@@ -1180,7 +1211,7 @@ def _get_triangle_conn_and_coords_h5py(
 
 
 def _get_triangle_conn_and_coords_from_h5py(
-    f: h5py.File,
+    f: h5py.File, cache: Optional["_H5pyReadCache"] = None
 ) -> Dict[int, Tuple[np.ndarray, np.ndarray]]:
     """Get per-volume triangle data from an open h5py file."""
     coords, node_start = _read_nodes_h5py(f)
@@ -1188,22 +1219,12 @@ def _get_triangle_conn_and_coords_from_h5py(
     tri_conn0 = tri_conn - node_start  # Convert to 0-based indexing
     tri_end = tri_start + tri_conn.shape[0] - 1
 
-    sets = _read_sets_h5py(f)
-    sets_by_handle = {s.handle: s for s in sets}
+    cache = cache or _H5pyReadCache(f)
+    sets_by_handle = {s.handle: s for s in cache.sets}
 
-    categories = _read_tag_h5py(f, "CATEGORY")
-    geom_dim = _read_tag_h5py(f, "GEOM_DIMENSION")
-
-    # Get GLOBAL_ID for sets
-    global_ids: Dict[int, int] = {}
-    sets_start_id = int(f["tstt/sets/list"].attrs["start_id"])
-    if "tstt/sets/tags/GLOBAL_ID" in f:
-        dense_gids = f["tstt/sets/tags/GLOBAL_ID"][...]
-        for idx, gid in enumerate(dense_gids):
-            handle = sets_start_id + idx
-            global_ids[handle] = int(gid)
-    else:
-        global_ids = _read_tag_h5py(f, "GLOBAL_ID")
+    categories = cache.tag("CATEGORY")
+    geom_dim = cache.tag("GEOM_DIMENSION")
+    global_ids = cache.set_global_ids
 
     # Build set of surface handles
     surface_handles = {h for h, cat in categories.items() if cat == "Surface"}
@@ -1723,12 +1744,13 @@ def _load_dagmc_data(
         )
 
     with h5py.File(filename, "r") as f:
+        cache = _H5pyReadCache(f)
         return _DAGMCData(
-            volume_data=_get_triangle_conn_and_coords_from_h5py(f),
+            volume_data=_get_triangle_conn_and_coords_from_h5py(f, cache=cache),
             volume_materials=_get_volumes_and_materials_from_h5py(
-                f, remove_prefix=True
+                f, remove_prefix=True, cache=cache
             ),
-            materials=_get_materials_from_h5py(f, remove_prefix=True),
+            materials=_get_materials_from_h5py(f, remove_prefix=True, cache=cache),
         )
 
 
@@ -2994,6 +3016,13 @@ def combine_h5m_files(
 
     for filepath in input_files:
         data = _load_dagmc_data(filepath, backend=backend)
+
+        orphans = sorted(set(data.volume_data) - set(data.volume_materials))
+        if orphans:
+            raise ValueError(
+                f"Cannot combine {filepath}: volumes {orphans} have no material "
+                "group. Assign a material or remove these volumes."
+            )
 
         for old_vid in sorted(data.volume_data):
             combined_vol_data[next_vol_id] = data.volume_data[old_vid]
