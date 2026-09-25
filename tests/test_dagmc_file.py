@@ -87,6 +87,61 @@ def test_dagmc_file_returns_triangle_data_copies(cube_geometry):
 
 
 @pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+def test_dagmc_file_mutates_in_memory_and_writes_once(
+    touching_boxes, cube_geometry, backend, tmp_path
+):
+    combined = str(tmp_path / "combined.h5m")
+    output = str(tmp_path / f"modified_{backend}.h5m")
+    di.combine_h5m_files(
+        [touching_boxes["filename"], cube_geometry["filename"]],
+        combined,
+        backend=backend,
+    )
+
+    with patch.object(
+        dagmc_file, "_load_dagmc_data", wraps=dagmc_file._load_dagmc_data
+    ) as load_mock:
+        model = di.DAGMCFile(combined, backend=backend)
+        assert model.remove_volumes(1) == [1]
+        assert model.remove_materials("big_box") == ["big_box"]
+        model.move(x=10.0)
+        model.rotate_around_axis(axis="z", degrees=90)
+
+        assert model.get_volumes_and_materials() == {3: "cube"}
+        bounding_box = model.get_bounding_box()
+        assert bounding_box.center == pytest.approx((0.0, 10.0, 0.0))
+        assert not (tmp_path / f"modified_{backend}.h5m").exists()
+        assert model.write(output) == output
+
+    assert load_mock.call_count == 1
+    assert di.get_volumes_and_materials(output, backend="h5py") == {3: "cube"}
+    written_box = di.get_bounding_box(output)
+    assert written_box.center == pytest.approx((0.0, 10.0, 0.0))
+
+
+def test_dagmc_file_mutation_errors_leave_data_unchanged(separated_boxes):
+    model = di.DAGMCFile(separated_boxes["filename"])
+    expected = model.get_volumes_and_materials()
+
+    with pytest.raises(ValueError, match="None of the specified volume IDs"):
+        model.remove_volumes(999)
+    with pytest.raises(ValueError, match="None of the specified materials"):
+        model.remove_materials("missing")
+    with pytest.raises(ValueError, match="Invalid axis"):
+        model.rotate_around_axis(axis="invalid")
+
+    assert model.get_volumes_and_materials() == expected
+
+
+def test_dagmc_file_remove_multiple_values(separated_boxes):
+    model = di.DAGMCFile(separated_boxes["filename"])
+
+    assert model.remove_volumes([2, 1]) == [1, 2]
+    assert model.get_volumes() == []
+    assert model.get_materials() == []
+
+
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
 def test_dagmc_file_missing_input_raises(backend):
     with pytest.raises(FileNotFoundError):
         di.DAGMCFile("does_not_exist.h5m", backend=backend)
