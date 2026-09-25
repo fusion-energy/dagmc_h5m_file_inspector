@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Literal, Optional, Sequence, Tuple, Union
+from typing import Callable, Dict, List, Literal, Optional, Sequence, Tuple, Union
 
 import h5py
 import numpy as np
@@ -30,13 +30,43 @@ class _SetInfo:
     flags: int
 
 
-@dataclass
 class _DAGMCData:
-    """Mutable in-memory data needed by DAGMC geometry operations."""
+    """Mutable in-memory data needed by DAGMC geometry operations.
 
-    volume_data: Dict[int, Tuple[np.ndarray, np.ndarray]]
-    volume_materials: Dict[int, str]
-    materials: List[str]
+    Volume ids and material tags come from the sets and tags, which are quick
+    to read. The per-volume triangle connectivity and coordinates cost far more
+    and only some operations need them, so they are read on first use rather
+    than during the load.
+    """
+
+    def __init__(
+        self,
+        volume_ids: List[int],
+        volume_materials: Dict[int, str],
+        materials: List[str],
+        volume_data_loader: Callable[[], Dict[int, Tuple[np.ndarray, np.ndarray]]],
+    ) -> None:
+        self.volume_ids = list(volume_ids)
+        self.volume_materials = volume_materials
+        self.materials = materials
+        self._volume_data_loader = volume_data_loader
+        self._volume_data: Optional[Dict[int, Tuple[np.ndarray, np.ndarray]]] = None
+
+    @property
+    def volume_data(self) -> Dict[int, Tuple[np.ndarray, np.ndarray]]:
+        """Triangle connectivity and coordinates per volume, read on demand."""
+        if self._volume_data is None:
+            self._volume_data = self._volume_data_loader()
+        return self._volume_data
+
+    @volume_data.setter
+    def volume_data(self, value: Dict[int, Tuple[np.ndarray, np.ndarray]]) -> None:
+        self._volume_data = value
+
+    @property
+    def volume_data_loaded(self) -> bool:
+        """Whether the triangle data has been read yet."""
+        return self._volume_data is not None
 
 
 # This is a reimplementation of the BoundingBox class that is mainly
@@ -1210,6 +1240,40 @@ def _get_triangle_conn_and_coords_h5py(
         return _get_triangle_conn_and_coords_from_h5py(f)
 
 
+def _get_volume_ids_from_h5py(f: h5py.File, cache: Optional["_H5pyReadCache"] = None):
+    """Get volume GLOBAL_IDs from an open h5py file, without reading triangles.
+
+    Uses the same handles as the triangle reader so the ids stay in step with
+    the keys of the triangle data once that is read.
+    """
+    cache = cache or _H5pyReadCache(f)
+    categories = cache.tag("CATEGORY")
+    geom_dim = cache.tag("GEOM_DIMENSION")
+    global_ids = cache.set_global_ids
+
+    volume_handles = {h for h, cat in categories.items() if cat == "Volume"}
+    volume_handles.update(h for h, dim in geom_dim.items() if dim == 3)
+
+    return sorted(
+        {global_ids[handle] for handle in volume_handles if handle in global_ids}
+    )
+
+
+def _get_volume_ids_from_pymoab(mbcore: object) -> List[int]:
+    """Get volume GLOBAL_IDs from a loaded pymoab Core, without triangles."""
+    import pymoab as mb
+
+    category_tag = mbcore.tag_get_handle(mb.types.CATEGORY_TAG_NAME)
+    id_tag = mbcore.tag_get_handle(mb.types.GLOBAL_ID_TAG_NAME)
+
+    volume_ents = mbcore.get_entities_by_type_and_tag(
+        0, mb.types.MBENTITYSET, category_tag, ["Volume"]
+    )
+    return sorted(
+        {mbcore.tag_get_data(id_tag, vol)[0][0].item() for vol in volume_ents}
+    )
+
+
 def _get_triangle_conn_and_coords_from_h5py(
     f: h5py.File, cache: Optional["_H5pyReadCache"] = None
 ) -> Dict[int, Tuple[np.ndarray, np.ndarray]]:
@@ -1735,22 +1799,34 @@ def _load_dagmc_data(
     if backend == "pymoab":
         _check_pymoab_available()
         mbcore = _load_moab_file(filename)
+
+        def load_pymoab_volume_data():
+            # the Core is still held by this closure, so no reload is needed
+            return _get_triangle_conn_and_coords_from_pymoab(mbcore)
+
         return _DAGMCData(
-            volume_data=_get_triangle_conn_and_coords_from_pymoab(mbcore),
+            volume_ids=_get_volume_ids_from_pymoab(mbcore),
             volume_materials=_get_volumes_and_materials_from_pymoab(
                 mbcore, remove_prefix=True
             ),
             materials=_get_materials_from_pymoab(mbcore, remove_prefix=True),
+            volume_data_loader=load_pymoab_volume_data,
         )
+
+    def load_h5py_volume_data():
+        # the file from the metadata read is closed by now, so reopen it
+        with h5py.File(filename, "r") as triangle_file:
+            return _get_triangle_conn_and_coords_from_h5py(triangle_file)
 
     with h5py.File(filename, "r") as f:
         cache = _H5pyReadCache(f)
         return _DAGMCData(
-            volume_data=_get_triangle_conn_and_coords_from_h5py(f, cache=cache),
+            volume_ids=_get_volume_ids_from_h5py(f, cache=cache),
             volume_materials=_get_volumes_and_materials_from_h5py(
                 f, remove_prefix=True, cache=cache
             ),
             materials=_get_materials_from_h5py(f, remove_prefix=True, cache=cache),
+            volume_data_loader=load_h5py_volume_data,
         )
 
 

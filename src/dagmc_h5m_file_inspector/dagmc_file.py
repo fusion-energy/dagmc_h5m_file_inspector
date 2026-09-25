@@ -180,7 +180,7 @@ class DAGMCFile:
 
     def get_volumes(self) -> List[int]:
         """Return the sorted volume IDs in the loaded file."""
-        return sorted(self._data.volume_data)
+        return sorted(self._data.volume_ids)
 
     def get_volumes_by_cell_id(self) -> Dict[int, float]:
         """Return cell IDs mapped to their geometric volumes."""
@@ -246,6 +246,11 @@ class DAGMCFile:
         for volume_id in volume_ids_to_remove:
             self._data.volume_data.pop(volume_id, None)
             self._data.volume_materials.pop(volume_id, None)
+        self._data.volume_ids = [
+            volume_id
+            for volume_id in self._data.volume_ids
+            if volume_id not in volume_ids_to_remove
+        ]
 
         removed = set(matched)
         self._data.materials = [m for m in self._data.materials if m not in removed]
@@ -267,9 +272,15 @@ class DAGMCFile:
             )
 
         used_before = set(self._data.volume_materials.values())
+        removed_ids = set(matched)
         for volume_id in matched:
             self._data.volume_data.pop(volume_id, None)
             self._data.volume_materials.pop(volume_id, None)
+        self._data.volume_ids = [
+            volume_id
+            for volume_id in self._data.volume_ids
+            if volume_id not in removed_ids
+        ]
         used_after = set(self._data.volume_materials.values())
 
         self._data.materials = [

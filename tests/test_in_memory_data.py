@@ -2,6 +2,7 @@ from unittest.mock import patch
 
 import pytest
 
+import dagmc_h5m_file_inspector as di
 from dagmc_h5m_file_inspector import core
 
 
@@ -67,3 +68,59 @@ def test_load_dagmc_data_reports_materials_without_volumes(
 
     assert data.materials == empty_material_group_boxes["materials"]
     assert "mat_unused" not in data.volume_materials.values()
+
+
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+def test_load_dagmc_data_defers_reading_triangles(separated_boxes, backend):
+    data = core._load_dagmc_data(separated_boxes["filename"], backend=backend)
+
+    assert data.volume_data_loaded is False
+    assert data.volume_ids == separated_boxes["volumes"]
+
+    data.volume_data  # noqa: B018 - reading the property is what loads it
+    assert data.volume_data_loaded is True
+
+
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+def test_volume_ids_match_the_triangle_data_keys(separated_boxes, backend):
+    """The ids are read from the sets and the triangle data is read later, so
+    the two have to agree about which volumes exist."""
+    data = core._load_dagmc_data(separated_boxes["filename"], backend=backend)
+
+    assert sorted(data.volume_ids) == sorted(data.volume_data)
+
+
+@pytest.mark.parametrize(
+    "query",
+    ["get_volumes", "get_materials", "get_volumes_and_materials"],
+)
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+def test_metadata_queries_do_not_read_triangles(separated_boxes, backend, query):
+    """These answers come from the sets and tags, so asking for them should not
+    pay for the triangle data."""
+    model = di.DAGMCFile(separated_boxes["filename"], backend=backend)
+    assert model._data.volume_data_loaded is False
+
+    getattr(model, query)()
+
+    assert model._data.volume_data_loaded is False
+
+
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+def test_geometry_queries_do_read_triangles(separated_boxes, backend):
+    model = di.DAGMCFile(separated_boxes["filename"], backend=backend)
+
+    model.get_bounding_box()
+
+    assert model._data.volume_data_loaded is True
+
+
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+def test_get_volumes_tracks_removals_without_the_triangle_data(
+    separated_boxes, backend
+):
+    model = di.DAGMCFile(separated_boxes["filename"], backend=backend)
+
+    assert model.remove_volumes(1) == [1]
+    assert model.get_volumes() == [2]
+    assert model.get_volumes() == sorted(model._data.volume_data)
