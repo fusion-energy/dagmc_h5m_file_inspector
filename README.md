@@ -231,6 +231,23 @@ bbox.upper_right  # (25.0, 10.0, 10.0)
 
 ## Getting geometric volume sizes by cell ID
 
+These are volumes of the stored triangle mesh, not exact source-CAD volumes.
+Planar meshes can reproduce analytic volumes to floating-point precision, while
+curved geometry also has a mesh-discretization error that depends on refinement.
+
+Both backends integrate each complete oriented boundary around a local reference
+point and use compensated summation to reduce cancellation from large coordinate
+offsets. Coordinates must still represent the geometry accurately in floating
+point; integration cannot recover detail already lost when coordinates were stored.
+
+Volume queries emit a ``RuntimeWarning`` identifying the volume if its signed
+result is negative, its normalized boundary-normal residual exceeds ``1e-10``,
+or machine epsilon times its tetrahedron cancellation indicator exceeds ``1e-8``.
+The cancellation indicator is the sum of absolute contributions divided by the
+absolute signed sum; an integrated signed sum of zero also warns. These are numerical
+diagnostics, not a proof of watertight topology or CAD fidelity. Returned volume
+magnitudes remain non-negative for compatibility.
+
 ```python
 import dagmc_h5m_file_inspector as di
 

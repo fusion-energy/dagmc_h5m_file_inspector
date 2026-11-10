@@ -4,6 +4,154 @@ import pytest
 from cad_to_dagmc import CadToDagmc
 
 
+@pytest.fixture
+def boundary_group_members():
+    def read(filename):
+        from pymoab import core, types
+
+        mesh = core.Core()
+        mesh.load_file(filename)
+        category_tag = mesh.tag_get_handle(types.CATEGORY_TAG_NAME)
+        name_tag = mesh.tag_get_handle(types.NAME_TAG_NAME)
+        id_tag = mesh.tag_get_handle(types.GLOBAL_ID_TAG_NAME)
+        groups = mesh.get_entities_by_type_and_tag(
+            0, types.MBENTITYSET, category_tag, ["Group"]
+        )
+        result = {}
+        for group in groups:
+            name = mesh.tag_get_data(name_tag, group)[0][0]
+            if name.startswith("boundary:"):
+                members = result.setdefault(name, [])
+                for member in mesh.get_entities_by_handle(group):
+                    members.append(
+                        (
+                            mesh.tag_get_data(category_tag, member)[0][0],
+                            int(mesh.tag_get_data(id_tag, member)[0][0]),
+                        )
+                    )
+        return {name: sorted(members) for name, members in result.items()}
+
+    return read
+
+
+@pytest.fixture
+def canonical_triangles():
+    def canonicalize(connectivity, coordinates):
+        triangles = coordinates[connectivity]
+        sort_keys = np.round(triangles, decimals=10)
+        vertex_order = np.lexsort(
+            (sort_keys[:, :, 2], sort_keys[:, :, 1], sort_keys[:, :, 0]), axis=1
+        )
+        ordered = np.take_along_axis(
+            triangles, vertex_order[:, :, None], axis=1
+        ).reshape(-1, 9)
+        return ordered[np.lexsort(np.round(ordered, decimals=10)[:, ::-1].T)]
+
+    return canonicalize
+
+
+@pytest.fixture
+def assert_closed_mesh():
+    def check(connectivity, coordinates, expected_volume, expected_area):
+        assert connectivity.ndim == 2 and connectivity.shape[1] == 3
+        assert coordinates.ndim == 2 and coordinates.shape[1] == 3
+        assert len(connectivity) > 0
+        assert np.issubdtype(connectivity.dtype, np.integer)
+        assert np.isfinite(coordinates).all()
+        assert connectivity.min() >= 0
+        assert connectivity.max() < len(coordinates)
+
+        triangles = coordinates[connectivity]
+        normals = np.cross(
+            triangles[:, 1] - triangles[:, 0],
+            triangles[:, 2] - triangles[:, 0],
+        )
+        triangle_areas = np.linalg.norm(normals, axis=1) / 2.0
+        assert np.all(triangle_areas > 0.0)
+        assert triangle_areas.sum() == pytest.approx(expected_area, rel=1e-10, abs=1e-9)
+        assert np.linalg.det(triangles).sum() / 6.0 == pytest.approx(
+            expected_volume, rel=1e-10, abs=1e-9
+        )
+
+        edges = np.concatenate(
+            [connectivity[:, [0, 1]], connectivity[:, [1, 2]], connectivity[:, [2, 0]]]
+        )
+        _, edge_indices, edge_counts = np.unique(
+            np.sort(edges, axis=1), axis=0, return_inverse=True, return_counts=True
+        )
+        np.testing.assert_array_equal(edge_counts, 2)
+        directions = np.where(edges[:, 0] < edges[:, 1], 1, -1)
+        np.testing.assert_array_equal(np.bincount(edge_indices, weights=directions), 0)
+
+    return check
+
+
+@pytest.fixture(params=["tetrahedron", "cuboid", "concave_prism", "hollow_box"])
+def analytic_mesh(request):
+    if request.param == "tetrahedron":
+        coordinates = np.array(
+            [[0, 0, 0], [2, 0, 0], [0, 3, 0], [0, 0, 4]], dtype=float
+        )
+        connectivity = np.array([[0, 2, 1], [0, 1, 3], [0, 3, 2], [1, 2, 3]])
+        return connectivity, coordinates, 4.0, 13.0 + np.sqrt(61.0)
+
+    if request.param == "concave_prism":
+        base = np.array([[0, 0], [2, 0], [2, 1], [1, 1], [1, 2], [0, 2]])
+        coordinates = np.vstack(
+            [
+                np.column_stack([base, np.zeros(6)]),
+                np.column_stack([base, np.full(6, 4)]),
+            ]
+        )
+        cap = np.array([[0, 1, 2], [0, 2, 3], [0, 3, 4], [0, 4, 5]])
+        sides = []
+        for vertex in range(6):
+            following = (vertex + 1) % 6
+            sides.extend(
+                [
+                    [vertex, following, following + 6],
+                    [vertex, following + 6, vertex + 6],
+                ]
+            )
+        connectivity = np.vstack([cap[:, ::-1], cap + 6, sides])
+        return connectivity, coordinates, 12.0, 38.0
+
+    coordinates = np.array(
+        [
+            [0, 0, 0],
+            [2, 0, 0],
+            [2, 3, 0],
+            [0, 3, 0],
+            [0, 0, 4],
+            [2, 0, 4],
+            [2, 3, 4],
+            [0, 3, 4],
+        ],
+        dtype=float,
+    )
+    connectivity = np.array(
+        [
+            [0, 2, 1],
+            [0, 3, 2],
+            [4, 5, 6],
+            [4, 6, 7],
+            [0, 1, 5],
+            [0, 5, 4],
+            [1, 2, 6],
+            [1, 6, 5],
+            [2, 3, 7],
+            [2, 7, 6],
+            [3, 0, 4],
+            [3, 4, 7],
+        ]
+    )
+    if request.param == "hollow_box":
+        coordinates = np.vstack([coordinates, coordinates / 2 + [0.5, 0.75, 1.0]])
+        connectivity = np.vstack([connectivity, connectivity[:, ::-1] + 8])
+        return connectivity, coordinates, 21.0, 65.0
+    return connectivity, coordinates, 24.0, 52.0
+
+
 def create_touching_boxes(tmp_path):
     """Create two boxes that touch at a shared face.
 
