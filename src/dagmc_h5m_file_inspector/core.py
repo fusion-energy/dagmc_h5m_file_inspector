@@ -1,4 +1,6 @@
+import warnings
 from dataclasses import dataclass
+from math import fsum
 from pathlib import Path
 from typing import Callable, Dict, List, Literal, Optional, Sequence, Tuple, Union
 
@@ -720,17 +722,45 @@ def _tri_indices_for_set(
     return np.asarray(handles, dtype=np.int64) - tri_start
 
 
-def _signed_volume_from_tris(
-    coords: np.ndarray,
-    tri_conn0: np.ndarray,
-    tri_indices: np.ndarray,
-) -> float:
-    """Calculate signed volume from triangles using tetrahedra method."""
-    tri_nodes = tri_conn0[tri_indices]
-    v0 = coords[tri_nodes[:, 0]]
-    v1 = coords[tri_nodes[:, 1]]
-    v2 = coords[tri_nodes[:, 2]]
-    return float(np.einsum("ij,ij->i", v0, np.cross(v1, v2)).sum() / 6.0)
+def _signed_volume_from_tris(triangles: np.ndarray, volume_id: int) -> float:
+    """Integrate a complete oriented boundary around a local reference point."""
+    lower = triangles.min(axis=(0, 1))
+    upper = triangles.max(axis=(0, 1))
+    reference = lower + (upper - lower) / 2.0
+    local = triangles - reference
+    normals = np.cross(local[:, 1] - local[:, 0], local[:, 2] - local[:, 0])
+    contributions = np.einsum("ij,ij->i", local[:, 0], normals) / 6.0
+    volume = fsum(contributions)
+    precision = np.finfo(float)
+    cancellation = fsum(np.abs(contributions)) / max(abs(volume), precision.tiny)
+    if volume == 0.0 or not np.isfinite(volume) or cancellation * precision.eps > 1e-8:
+        warnings.warn(
+            f"Volume {volume_id} is numerically ill-conditioned "
+            f"(cancellation indicator {cancellation:.3g}); inspect the mesh "
+            "before relying on its calculated volume.",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+
+    closure = np.array([fsum(normals[:, dimension]) for dimension in range(3)])
+    closure_residual = np.linalg.norm(closure) / max(
+        fsum(np.linalg.norm(normals, axis=1)), precision.tiny
+    )
+    if closure_residual > 1e-10:
+        warnings.warn(
+            f"Volume {volume_id} has boundary closure residual "
+            f"{closure_residual:.3g}; its calculated volume may be unreliable.",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+    if volume < 0.0:
+        warnings.warn(
+            f"Volume {volume_id} has negative signed volume {volume:.12g}; "
+            "check surface orientation before using the absolute volume.",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+    return volume
 
 
 def _surface_area_from_tris(
@@ -751,6 +781,7 @@ def _surface_area_from_tris(
 def _volume_for_volume_set(
     *,
     vol_handle: int,
+    volume_id: int,
     sets_by_handle: Dict[int, _SetInfo],
     surface_handles: set,
     geom_sense: Dict[int, Tuple[int, int]],
@@ -773,7 +804,7 @@ def _volume_for_volume_set(
             if h in geom_sense and vol_handle in geom_sense[h]
         ]
 
-    total = 0.0
+    all_triangles = []
     for surf_handle in surfaces:
         surf_set = sets_by_handle.get(surf_handle)
         if surf_set is None:
@@ -790,13 +821,14 @@ def _volume_for_volume_set(
         if tri_indices.size == 0:
             continue
 
-        total += sign * _signed_volume_from_tris(
-            coords,
-            tri_conn0,
-            tri_indices,
-        )
+        triangles = coords[tri_conn0[tri_indices]]
+        if sign < 0:
+            triangles = triangles[:, ::-1]
+        all_triangles.append(triangles)
 
-    return total
+    if not all_triangles:
+        return 0.0
+    return _signed_volume_from_tris(np.concatenate(all_triangles), volume_id)
 
 
 def _surface_areas_for_volume_set(
@@ -1068,6 +1100,7 @@ def _get_volumes_sizes_h5py(filename: str) -> Dict[int, float]:
 
             size = _volume_for_volume_set(
                 vol_handle=vol_handle,
+                volume_id=int(vol_gid),
                 sets_by_handle=sets_by_handle,
                 surface_handles=surface_handles,
                 geom_sense=geom_sense,
@@ -1937,7 +1970,7 @@ def _get_volumes_sizes_pymoab(filename: str) -> Dict[int, float]:
         # Get child surfaces of this volume
         surfaces = mbcore.get_child_meshsets(vol_ent)
 
-        total_signed_volume = 0.0
+        all_triangles = []
 
         for surf in surfaces:
             # Determine the sign for this surface relative to this volume
@@ -1981,16 +2014,16 @@ def _get_volumes_sizes_pymoab(filename: str) -> Dict[int, float]:
                 tri_array.append([vert_to_idx[v] for v in conn])
             tri_array = np.array(tri_array)
 
-            # Calculate signed volume for this surface's triangles
-            v0 = coords[tri_array[:, 0]]
-            v1 = coords[tri_array[:, 1]]
-            v2 = coords[tri_array[:, 2]]
-            cross = np.cross(v1, v2)
-            surface_signed_volume = np.sum(v0 * cross, axis=1).sum() / 6.0
+            triangles = coords[tri_array]
+            if sign < 0:
+                triangles = triangles[:, ::-1]
+            all_triangles.append(triangles)
 
-            total_signed_volume += sign * surface_signed_volume
-
-        volume_sizes[vol_gid] = abs(total_signed_volume)
+        volume_sizes[vol_gid] = (
+            abs(_signed_volume_from_tris(np.concatenate(all_triangles), vol_gid))
+            if all_triangles
+            else 0.0
+        )
 
     return volume_sizes
 

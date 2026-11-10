@@ -160,18 +160,34 @@ def test_material_with_no_volumes_survives_unrelated_removals(
 
 @pytest.mark.parametrize("geometry", WRITABLE_FIXTURES, indirect=True)
 @pytest.mark.parametrize("backend", BACKENDS)
-def test_write_round_trips_volumes_and_materials(geometry, backend, tmp_path):
+@pytest.mark.parametrize("read_backend", BACKENDS)
+def test_write_round_trips_volumes_and_materials(
+    geometry, backend, read_backend, tmp_path, assert_closed_mesh
+):
     model = di.DAGMCFile(geometry["filename"], backend=backend)
     output = str(tmp_path / "round_trip.h5m")
     model.write(output)
 
-    reloaded = di.DAGMCFile(output, backend=backend)
+    reloaded = di.DAGMCFile(output, backend=read_backend)
     assert reloaded.get_volumes() == geometry["volumes"]
     assert reloaded.get_volumes_and_materials() == geometry["volumes_and_materials"]
     # an empty mat: group has no volumes to write, so it does not survive
     assert reloaded.get_materials() == sorted(
         set(geometry["volumes_and_materials"].values())
     )
+    assert reloaded.get_volumes_by_cell_id() == pytest.approx(
+        geometry["expected_volume_sizes"], rel=1e-10, abs=1e-9
+    )
+    for volume_id, (
+        connectivity,
+        coordinates,
+    ) in reloaded.get_triangle_conn_and_coords_by_volume().items():
+        assert_closed_mesh(connectivity, coordinates, 1000.0, 600.0)
+        expected_lower = np.array([(volume_id - 1) * 15.0 - 5.0, -5.0, -5.0])
+        np.testing.assert_allclose(coordinates.min(axis=0), expected_lower, atol=1e-9)
+        np.testing.assert_allclose(
+            coordinates.max(axis=0), expected_lower + 10, atol=1e-9
+        )
 
 
 @pytest.mark.parametrize("backend", BACKENDS)
@@ -220,7 +236,7 @@ def test_bounding_box_ignores_a_material_with_no_volumes(
 
 @pytest.mark.parametrize("backend", BACKENDS)
 def test_combine_renumbers_volumes_across_shared_materials(
-    two_material_boxes, three_material_boxes, backend, tmp_path
+    two_material_boxes, three_material_boxes, backend, tmp_path, assert_closed_mesh
 ):
     """Combining should keep every volume and carry its material over."""
     output = str(tmp_path / "combined.h5m")
@@ -236,6 +252,17 @@ def test_combine_renumbers_volumes_across_shared_materials(
     expected = list(two_material_boxes["volumes_and_materials"].values())
     expected += list(three_material_boxes["volumes_and_materials"].values())
     assert list(combined.get_volumes_and_materials().values()) == expected
+    assert combined.get_volumes_by_cell_id() == pytest.approx(
+        {volume_id: 1000.0 for volume_id in range(1, 8)}, rel=1e-10, abs=1e-9
+    )
+    assert combined.get_volumes_by_material_name() == pytest.approx(
+        {"mat_a": 3000.0, "mat_b": 3000.0, "mat_c": 1000.0}, rel=1e-10, abs=1e-9
+    )
+    for (
+        connectivity,
+        coordinates,
+    ) in combined.get_triangle_conn_and_coords_by_volume().values():
+        assert_closed_mesh(connectivity, coordinates, 1000.0, 600.0)
 
 
 @pytest.mark.parametrize("backend", BACKENDS)

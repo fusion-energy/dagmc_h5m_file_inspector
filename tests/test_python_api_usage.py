@@ -437,6 +437,132 @@ def test_bounding_box_properties(touching_boxes, backend):
 
 
 @pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+@pytest.mark.parametrize(
+    "transformation",
+    [
+        "identity",
+        "translation",
+        "rotation",
+        "reflection",
+        "vertex_order",
+        "triangle_order",
+        "small_scale",
+        "large_scale",
+    ],
+)
+def test_analytic_mesh_volume_invariants(
+    analytic_mesh, transformation, backend, tmp_path, assert_closed_mesh
+):
+    from dagmc_h5m_file_inspector.core import _write_h5m
+
+    connectivity, coordinates, expected_volume, expected_area = analytic_mesh
+    assert_closed_mesh(connectivity, coordinates, expected_volume, expected_area)
+    if transformation == "translation":
+        coordinates = coordinates + [1e9, -2e9, 3e9]
+    elif transformation == "rotation":
+        angle = np.deg2rad(37.0)
+        rotation = np.array(
+            [
+                [np.cos(angle), -np.sin(angle), 0],
+                [np.sin(angle), np.cos(angle), 0],
+                [0, 0, 1],
+            ]
+        )
+        coordinates = coordinates @ rotation.T
+    elif transformation == "reflection":
+        coordinates = coordinates * [-1, 1, 1]
+        connectivity = connectivity[:, ::-1]
+    elif transformation == "vertex_order":
+        order = np.random.default_rng(42).permutation(len(coordinates))
+        coordinates = coordinates[order]
+        connectivity = np.argsort(order)[connectivity]
+    elif transformation == "triangle_order":
+        connectivity = np.random.default_rng(42).permutation(connectivity)
+    elif transformation in ("small_scale", "large_scale"):
+        scale = 1e-6 if transformation == "small_scale" else 1e6
+        coordinates = coordinates * scale
+        expected_volume *= scale**3
+
+    filename = str(tmp_path / "analytic.h5m")
+    _write_h5m(filename, {17: (connectivity, coordinates)}, {17: "solid"})
+    assert di.get_volumes_by_cell_id(filename, backend=backend) == pytest.approx(
+        {17: expected_volume}, rel=1e-11, abs=1e-30
+    )
+    assert di.get_volumes_by_cell_id_and_material_name(
+        filename, backend=backend
+    ) == pytest.approx({(17, "solid"): expected_volume}, rel=1e-11, abs=1e-30)
+
+
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+@pytest.mark.parametrize("analytic_mesh", ["cuboid"], indirect=True)
+def test_ill_conditioned_volume_warns(analytic_mesh, backend, tmp_path):
+    from dagmc_h5m_file_inspector.core import _write_h5m
+
+    connectivity, coordinates, _, _ = analytic_mesh
+    center = (coordinates.min(axis=0) + coordinates.max(axis=0)) / 2.0
+    inner_coordinates = center + (coordinates - center) * (1.0 - 1e-12)
+    shell_connectivity = np.vstack(
+        [connectivity, connectivity[:, ::-1] + len(coordinates)]
+    )
+    shell_coordinates = np.vstack([coordinates, inner_coordinates])
+    filename = str(tmp_path / "thin_shell.h5m")
+    _write_h5m(filename, {17: (shell_connectivity, shell_coordinates)}, {17: "shell"})
+
+    with pytest.warns(RuntimeWarning, match="Volume 17.*ill-conditioned"):
+        di.get_volumes_by_cell_id(filename, backend=backend)
+
+
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+@pytest.mark.parametrize("analytic_mesh", ["tetrahedron"], indirect=True)
+def test_negative_signed_volume_warns(analytic_mesh, backend, tmp_path):
+    from dagmc_h5m_file_inspector.core import _write_h5m
+
+    connectivity, coordinates, expected_volume, _ = analytic_mesh
+    filename = str(tmp_path / "inward.h5m")
+    _write_h5m(filename, {17: (connectivity[:, ::-1], coordinates)}, {17: "solid"})
+
+    with pytest.warns(RuntimeWarning, match="Volume 17.*negative signed volume"):
+        volumes = di.get_volumes_by_cell_id(filename, backend=backend)
+    assert volumes == pytest.approx({17: expected_volume}, rel=1e-11)
+
+
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+@pytest.mark.parametrize("analytic_mesh", ["tetrahedron"], indirect=True)
+def test_boundary_closure_residual_warns(analytic_mesh, backend, tmp_path):
+    from dagmc_h5m_file_inspector.core import _write_h5m
+
+    connectivity, coordinates, _, _ = analytic_mesh
+    filename = str(tmp_path / "open_boundary.h5m")
+    _write_h5m(filename, {17: (connectivity[1:], coordinates)}, {17: "solid"})
+
+    with pytest.warns(RuntimeWarning, match="Volume 17.*boundary closure residual"):
+        di.get_volumes_by_cell_id(filename, backend=backend)
+
+
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+@pytest.mark.parametrize(
+    "offset",
+    [(0.0, 0.0, 0.0), (1e6, -2e6, 3e6), (1e9, -2e9, 3e9)],
+)
+def test_volume_sizes_translation_invariant(touching_boxes, backend, offset, tmp_path):
+    """Issue #61: moving a closed boundary must not change its enclosed volume."""
+    import shutil
+
+    filename = str(tmp_path / "translated.h5m")
+    shutil.copy2(touching_boxes["filename"], filename)
+    with h5py.File(filename, "r+") as mesh:
+        coordinates = mesh["tstt/nodes/coordinates"]
+        coordinates[...] = coordinates[...] + np.asarray(offset)
+
+    assert di.get_volumes_by_cell_id(filename, backend=backend) == pytest.approx(
+        touching_boxes["expected_volume_sizes"], rel=1e-10, abs=1e-9
+    )
+    assert di.get_volumes_by_material_name(filename, backend=backend) == pytest.approx(
+        {"small_box": 1000.0, "big_box": 8000.0}, rel=1e-10, abs=1e-9
+    )
+
+
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
 def test_volume_sizes_by_cell_id(touching_boxes, backend):
     """Extracts the geometric volumes from a dagmc file and checks they
     match the expected cube volumes"""
@@ -806,11 +932,11 @@ def test_set_openmc_material_volumes_with_list(touching_boxes, backend):
         backend=backend,
     )
 
-    # Check volumes are set correctly (with 5% tolerance for mesh discretization)
+    # Planar triangulation does not introduce a discretization error.
     expected = touching_boxes["expected_volume_sizes"]
     # small_box is volume 1, big_box is volume 2
-    assert abs(small_box_mat.volume - expected[1]) / expected[1] < 0.05
-    assert abs(big_box_mat.volume - expected[2]) / expected[2] < 0.05
+    assert small_box_mat.volume == pytest.approx(expected[1], rel=1e-10, abs=1e-9)
+    assert big_box_mat.volume == pytest.approx(expected[2], rel=1e-10, abs=1e-9)
 
 
 @pytest.mark.parametrize("backend", ["h5py", "pymoab"])
@@ -832,8 +958,8 @@ def test_set_openmc_material_volumes_with_materials_object(touching_boxes, backe
 
     # Check volumes are set correctly
     expected = touching_boxes["expected_volume_sizes"]
-    assert abs(small_box_mat.volume - expected[1]) / expected[1] < 0.05
-    assert abs(big_box_mat.volume - expected[2]) / expected[2] < 0.05
+    assert small_box_mat.volume == pytest.approx(expected[1], rel=1e-10, abs=1e-9)
+    assert big_box_mat.volume == pytest.approx(expected[2], rel=1e-10, abs=1e-9)
 
 
 @pytest.mark.parametrize("backend", ["h5py", "pymoab"])
@@ -855,7 +981,7 @@ def test_set_openmc_material_volumes_non_matching_materials(touching_boxes, back
 
     # Matching material should have volume set
     expected = touching_boxes["expected_volume_sizes"]
-    assert abs(small_box_mat.volume - expected[1]) / expected[1] < 0.05
+    assert small_box_mat.volume == pytest.approx(expected[1], rel=1e-10, abs=1e-9)
 
     # Non-matching material should remain None
     assert unmatched_mat.volume is None
@@ -917,7 +1043,7 @@ def test_set_openmc_material_volumes_with_none_names(touching_boxes, backend):
 
     # Named material should have volume set
     expected = touching_boxes["expected_volume_sizes"]
-    assert abs(small_box_mat.volume - expected[1]) / expected[1] < 0.05
+    assert small_box_mat.volume == pytest.approx(expected[1], rel=1e-10, abs=1e-9)
 
     # Unnamed material should remain unchanged
     assert unnamed_mat.volume is None
@@ -939,11 +1065,7 @@ H5M_TEST_FILES_OPENMC_STOCHASTIC = [
 
 @pytest.mark.parametrize("filename", H5M_TEST_FILES_OPENMC_STOCHASTIC)
 def test_volume_sizes_openmc_stochastic_consistency(filename, tmp_path):
-    """Verify our volume calculations match OpenMC stochastic results.
-
-    OpenMC uses Monte Carlo sampling to estimate volumes, so we allow
-    a larger tolerance (5%) to account for statistical noise.
-    """
+    """Compare every material with seeded OpenMC results within six sigma."""
     from pathlib import Path
 
     import openmc
@@ -984,6 +1106,7 @@ def test_volume_sizes_openmc_stochastic_consistency(filename, tmp_path):
     # Settings for volume calculation
     settings = openmc.Settings()
     settings.run_mode = "volume"
+    settings.seed = 12345
 
     # Create volume calculation for all materials
     vol_calc = openmc.VolumeCalculation(
@@ -1006,33 +1129,24 @@ def test_volume_sizes_openmc_stochastic_consistency(filename, tmp_path):
         # Read results
         results = openmc.VolumeCalculation.from_hdf5("volume_1.h5")
 
-        # Get OpenMC volumes by material name
-        openmc_volumes_by_mat = {}
-        for domain, vol in results.volumes.items():
-            # domain is the material ID
-            for mat in openmc_mats:
-                if mat.id == domain:
-                    openmc_volumes_by_mat[mat.name] = vol.nominal_value
-                    break
-
-        # Get our volumes by material name for comparison
-        h5py_volumes_by_mat = di.get_volumes_by_material_name(
-            abs_filename, backend="h5py"
-        )
-
-        # Compare volumes (allow 5% tolerance for stochastic noise)
-        for mat_name in h5py_volumes_by_mat:
-            if mat_name in openmc_volumes_by_mat:
-                h5py_vol = h5py_volumes_by_mat[mat_name]
-                openmc_vol = openmc_volumes_by_mat[mat_name]
-
-                if openmc_vol > 1e-10:
-                    rel_diff = abs(h5py_vol - openmc_vol) / openmc_vol
-                    assert rel_diff < 0.05, (
-                        f"Material '{mat_name}' volume differs: "
-                        f"h5py={h5py_vol}, openmc={openmc_vol}, "
-                        f"rel_diff={rel_diff}"
-                    )
+        names_by_id = {material.id: material.name for material in openmc_mats}
+        assert set(results.volumes) == set(names_by_id)
+        openmc_volumes_by_mat = {
+            names_by_id[domain]: estimate
+            for domain, estimate in results.volumes.items()
+        }
+        for backend in ("h5py", "pymoab"):
+            volumes_by_mat = di.get_volumes_by_material_name(
+                abs_filename, backend=backend
+            )
+            assert set(volumes_by_mat) == set(openmc_volumes_by_mat)
+            for material, volume in volumes_by_mat.items():
+                estimate = openmc_volumes_by_mat[material]
+                tolerance = 6.0 * estimate.std_dev + 1e-10 * max(abs(volume), 1.0)
+                assert abs(volume - estimate.nominal_value) <= tolerance, (
+                    f"{backend} material {material}: calculated={volume}, "
+                    f"OpenMC={estimate}, tolerance={tolerance}"
+                )
     finally:
         os.chdir(original_dir)
 
@@ -1113,7 +1227,9 @@ def test_triangle_conn_and_coords_file_not_found(backend):
 
 
 @pytest.mark.parametrize("filename", H5M_TEST_FILES)
-def test_triangle_conn_and_coords_h5py_pymoab_consistency(filename):
+def test_triangle_conn_and_coords_h5py_pymoab_consistency(
+    filename, canonical_triangles
+):
     """Verify h5py and pymoab backends return equivalent triangle data"""
 
     h5py_data = di.get_triangle_conn_and_coords_by_volume(filename, backend="h5py")
@@ -1141,10 +1257,8 @@ def test_triangle_conn_and_coords_h5py_pymoab_consistency(filename):
             f"h5py={len(h5py_coords)}, pymoab={len(pymoab_coords)}"
         )
 
-        # Coordinates should be the same (may be in different order)
-        # Sort coordinates for comparison
-        h5py_sorted = np.sort(h5py_coords, axis=0)
-        pymoab_sorted = np.sort(pymoab_coords, axis=0)
+        h5py_sorted = h5py_coords[np.lexsort(h5py_coords[:, ::-1].T)]
+        pymoab_sorted = pymoab_coords[np.lexsort(pymoab_coords[:, ::-1].T)]
         np.testing.assert_allclose(
             h5py_sorted,
             pymoab_sorted,
@@ -1152,44 +1266,38 @@ def test_triangle_conn_and_coords_h5py_pymoab_consistency(filename):
             atol=1e-10,
             err_msg=f"Volume {vol_id}: coordinates differ",
         )
+        np.testing.assert_allclose(
+            canonical_triangles(h5py_conn, h5py_coords),
+            canonical_triangles(pymoab_conn, pymoab_coords),
+            rtol=1e-10,
+            atol=1e-10,
+            err_msg=f"Volume {vol_id}: triangle geometry differs",
+        )
 
 
 @pytest.mark.parametrize("backend", ["h5py", "pymoab"])
-def test_triangle_conn_and_coords_mesh_validity(touching_boxes, backend):
-    """Test that the returned mesh data can be used to create valid PyVista meshes"""
-
+@pytest.mark.parametrize("geometry_name", ["touching_boxes", "separated_boxes"])
+def test_triangle_conn_and_coords_mesh_validity(
+    request, geometry_name, backend, assert_closed_mesh
+):
+    """Triangle data must form closed, oriented solids with analytic sizes."""
+    geometry = request.getfixturevalue(geometry_name)
     data = di.get_triangle_conn_and_coords_by_volume(
-        filename=touching_boxes["filename"],
-        backend=backend,
+        filename=geometry["filename"], backend=backend
     )
 
-    try:
-        import pyvista as pv
-
-        HAS_PYVISTA = True
-    except ImportError:
-        HAS_PYVISTA = False
-
-    if not HAS_PYVISTA:
-        pytest.skip("pyvista not installed")
-
-    for vol_id in touching_boxes["volumes"]:
-        connectivity, coordinates = data[vol_id]
-
-        # Convert to PyVista format (prepend 3 to each row)
-        n_triangles = connectivity.shape[0]
-        faces = np.hstack(
-            [np.full((n_triangles, 1), 3, dtype=np.int64), connectivity]
-        ).flatten()
-
-        # Create PyVista mesh - this should not raise an error
-        mesh = pv.PolyData(coordinates, faces)
-
-        # Mesh should have the correct number of cells (triangles)
-        assert mesh.n_cells == n_triangles
-
-        # Mesh should have the correct number of points
-        assert mesh.n_points == len(coordinates)
+    assert set(data) == set(geometry["volumes"])
+    for volume_id, (connectivity, coordinates) in data.items():
+        expected_volume = geometry["expected_volume_sizes"][volume_id]
+        expected_area = 2400.0 if expected_volume == 8000 else 600.0
+        assert_closed_mesh(connectivity, coordinates, expected_volume, expected_area)
+        material = geometry["volumes_and_materials"][volume_id]
+        np.testing.assert_allclose(
+            coordinates.min(axis=0), geometry[f"{material}_lower_left"], atol=1e-9
+        )
+        np.testing.assert_allclose(
+            coordinates.max(axis=0), geometry[f"{material}_upper_right"], atol=1e-9
+        )
 
 
 # ============================================================================
@@ -1241,18 +1349,23 @@ def test_convert_h5m_to_vtkhdf_structure(touching_boxes, tmp_path):
         assert "material_names" in root["FieldData"]
 
 
-def test_convert_h5m_to_vtkhdf_data_integrity(touching_boxes, tmp_path):
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+def test_convert_h5m_to_vtkhdf_data_integrity(
+    touching_boxes, tmp_path, backend, assert_closed_mesh
+):
     """Test that the VTKHDF file contains correct mesh data"""
 
     output_file = str(tmp_path / "output.vtkhdf")
     di.convert_h5m_to_vtkhdf(
         h5m_filename=touching_boxes["filename"],
         vtkhdf_filename=output_file,
+        backend=backend,
     )
 
     # Get expected data from the source
     per_vol = di.get_triangle_conn_and_coords_by_volume(
         filename=touching_boxes["filename"],
+        backend=backend,
     )
     expected_n_tris = sum(len(c) for c, _ in per_vol.values())
     expected_n_verts = sum(len(v) for _, v in per_vol.values())
@@ -1285,21 +1398,34 @@ def test_convert_h5m_to_vtkhdf_data_integrity(touching_boxes, tmp_path):
         assert np.all(conn >= 0)
         assert np.all(conn < n_points)
 
+        points = root["Points"][()]
+        triangles = conn.reshape(-1, 3)
+        cell_ids = root["CellData/cell_id"][()]
+        assert set(cell_ids) == {1, 2}
+        for volume_id, expected_volume in touching_boxes[
+            "expected_volume_sizes"
+        ].items():
+            expected_area = 600.0 if volume_id == 1 else 2400.0
+            assert_closed_mesh(
+                triangles[cell_ids == volume_id], points, expected_volume, expected_area
+            )
 
-def test_convert_h5m_to_vtkhdf_cell_data(touching_boxes, tmp_path):
+
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+def test_convert_h5m_to_vtkhdf_cell_data(touching_boxes, tmp_path, backend):
     """Test that cell_id and material_id arrays are correct"""
 
     output_file = str(tmp_path / "output.vtkhdf")
     di.convert_h5m_to_vtkhdf(
         h5m_filename=touching_boxes["filename"],
         vtkhdf_filename=output_file,
+        backend=backend,
     )
 
-    vol_mat = di.get_volumes_and_materials(
-        filename=touching_boxes["filename"],
-    )
+    vol_mat = touching_boxes["volumes_and_materials"]
     per_vol = di.get_triangle_conn_and_coords_by_volume(
         filename=touching_boxes["filename"],
+        backend=backend,
     )
 
     with h5py.File(output_file, "r") as f:
@@ -1705,20 +1831,45 @@ def test_remove_material_openmc_transport(touching_boxes, backend, tmp_path):
 
 
 @pytest.mark.parametrize("backend", ["h5py", "pymoab"])
-def test_remove_single_volume(touching_boxes, backend, tmp_path):
-    """Remove one volume by ID while retaining the other volume."""
+@pytest.mark.parametrize("read_backend", ["h5py", "pymoab"])
+@pytest.mark.parametrize(
+    ("removed_id", "retained_id", "retained_material", "expected_area"),
+    [(1, 2, "big_box", 2400.0), (2, 1, "small_box", 600.0)],
+)
+def test_remove_single_volume(
+    touching_boxes,
+    backend,
+    read_backend,
+    removed_id,
+    retained_id,
+    retained_material,
+    expected_area,
+    tmp_path,
+):
+    """Removing either touching volume preserves the retained solid's geometry."""
     output = str(tmp_path / f"removed_volume_{backend}.h5m")
 
     removed = di.remove_volumes(
         input_filename=touching_boxes["filename"],
         output_filename=output,
-        volume_ids_to_remove=1,
+        volume_ids_to_remove=removed_id,
         backend=backend,
     )
 
-    assert removed == [1]
-    assert di.get_volumes(output, backend="h5py") == [2]
-    assert di.get_volumes_and_materials(output, backend="h5py") == {2: "big_box"}
+    assert removed == [removed_id]
+    assert di.get_volumes(output, backend=read_backend) == [retained_id]
+    assert di.get_volumes_and_materials(output, backend=read_backend) == {
+        retained_id: retained_material
+    }
+    assert di.get_volumes_by_cell_id(output, backend=read_backend) == pytest.approx(
+        {retained_id: touching_boxes["expected_volume_sizes"][retained_id]},
+        rel=0.0,
+        abs=1e-9,
+    )
+    areas = di.get_surface_area_by_cell_id(
+        output, cell_id=retained_id, backend=read_backend
+    )
+    assert sum(areas) == pytest.approx(expected_area, rel=0.0, abs=1e-9)
 
 
 @pytest.mark.parametrize("backend", ["h5py", "pymoab"])
@@ -2111,14 +2262,21 @@ def test_surface_ids_by_cell_id_cube(cube_geometry, backend):
 
 @pytest.mark.parametrize("backend", ["h5py", "pymoab"])
 def test_surface_ids_by_cell_id_touching_boxes(touching_boxes, backend):
-    """Each volume in touching boxes should have bounding surfaces."""
+    """Each solid has its own complete boundary, including the shared patch."""
+    areas = di.get_surface_area_by_surface_id(
+        touching_boxes["filename"], backend=backend
+    )
     for cell_id in touching_boxes["volumes"]:
         result = di.get_surface_ids_by_cell_id(
             filename=touching_boxes["filename"],
             cell_id=cell_id,
             backend=backend,
         )
-        assert len(result) > 0
+        assert len(result) == (6 if cell_id == 1 else 7)
+        assert len(result) == len(set(result))
+        assert sum(areas[surface_id] for surface_id in result) == pytest.approx(
+            600.0 if cell_id == 1 else 2400.0, rel=1e-10, abs=1e-9
+        )
         assert all(isinstance(s, int) for s in result)
 
 
@@ -2154,14 +2312,21 @@ def test_surface_ids_by_material_name_cube(cube_geometry, backend):
 
 @pytest.mark.parametrize("backend", ["h5py", "pymoab"])
 def test_surface_ids_by_material_name_touching_boxes(touching_boxes, backend):
-    """Each material in touching boxes should have bounding surfaces."""
+    """Material-filtered surfaces bound the expected solid, not the whole model."""
+    areas = di.get_surface_area_by_surface_id(
+        touching_boxes["filename"], backend=backend
+    )
     for material in touching_boxes["materials"]:
         result = di.get_surface_ids_by_material_name(
             filename=touching_boxes["filename"],
             material=material,
             backend=backend,
         )
-        assert len(result) > 0
+        assert len(result) == (6 if material == "small_box" else 7)
+        assert len(result) == len(set(result))
+        assert sum(areas[surface_id] for surface_id in result) == pytest.approx(
+            600.0 if material == "small_box" else 2400.0, rel=1e-10, abs=1e-9
+        )
 
 
 @pytest.mark.parametrize("backend", ["h5py", "pymoab"])
@@ -2182,7 +2347,7 @@ def test_surface_ids_by_material_name_invalid(cube_geometry, backend):
 
 @pytest.mark.parametrize("backend", ["h5py", "pymoab"])
 def test_surface_shared_status_touching_boxes(touching_boxes, backend):
-    """Touching boxes should have at least one shared surface with 2 cell_ids."""
+    """The two solids share exactly one 10x10 patch of their boundaries."""
     result = di.get_surface_shared_status(
         filename=touching_boxes["filename"],
         backend=backend,
@@ -2196,7 +2361,12 @@ def test_surface_shared_status_touching_boxes(touching_boxes, backend):
 
     # At least one surface should be shared (2 cell_ids)
     shared = {k: v for k, v in result.items() if len(v["cell_ids"]) == 2}
-    assert len(shared) >= 1
+    assert len(result) == 12
+    assert len(shared) == 1
+    areas = di.get_surface_area_by_surface_id(
+        touching_boxes["filename"], backend=backend
+    )
+    assert sum(areas[surface_id] for surface_id in shared) == pytest.approx(100.0)
 
     # The shared surface should reference both materials
     for info in shared.values():
@@ -2217,8 +2387,13 @@ def test_surface_shared_status_separated_boxes(separated_boxes, backend):
         backend=backend,
     )
 
-    for surf_id, info in result.items():
-        assert len(info["cell_ids"]) <= 1
+    assert len(result) == 12
+    for info in result.values():
+        assert len(info["cell_ids"]) == 1
+        cell_id = info["cell_ids"][0]
+        assert info["materials"] == [separated_boxes["volumes_and_materials"][cell_id]]
+    assert sum(info["cell_ids"] == [1] for info in result.values()) == 6
+    assert sum(info["cell_ids"] == [2] for info in result.values()) == 6
 
 
 @pytest.mark.parametrize("backend", ["h5py", "pymoab"])
@@ -2238,6 +2413,70 @@ def test_surface_shared_status_cube(cube_geometry, backend):
 # ============================================================================
 # Tests for rotate_around_axis
 # ============================================================================
+
+
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+@pytest.mark.parametrize(
+    ("axis", "degrees", "coordinate_order", "signs"),
+    [
+        ("x", 90, [0, 2, 1], [1, -1, 1]),
+        ("x", -90, [0, 2, 1], [1, 1, -1]),
+        ("y", 90, [2, 1, 0], [1, 1, -1]),
+        ("y", -90, [2, 1, 0], [-1, 1, 1]),
+        ("z", 90, [1, 0, 2], [-1, 1, 1]),
+        ("z", -90, [1, 0, 2], [1, -1, 1]),
+    ],
+)
+def test_rotation_preserves_off_origin_mesh(
+    touching_boxes,
+    backend,
+    axis,
+    degrees,
+    coordinate_order,
+    signs,
+    tmp_path,
+    canonical_triangles,
+    assert_closed_mesh,
+):
+    import shutil
+    from pathlib import Path
+
+    source = str(tmp_path / "off_origin.h5m")
+    output = str(tmp_path / "rotated.h5m")
+    shutil.copy2(touching_boxes["filename"], source)
+    with h5py.File(source, "r+") as mesh:
+        points = mesh["tstt/nodes/coordinates"]
+        points[...] = points[...] + [37.0, -19.0, 23.0]
+    original_bytes = Path(source).read_bytes()
+    original = di.get_triangle_conn_and_coords_by_volume(source, backend=backend)
+
+    assert (
+        di.rotate_around_axis(
+            source, axis=axis, degrees=degrees, output=output, backend=backend
+        )
+        == output
+    )
+    assert Path(source).read_bytes() == original_bytes
+    for read_backend in ("h5py", "pymoab"):
+        rotated = di.get_triangle_conn_and_coords_by_volume(
+            output, backend=read_backend
+        )
+        assert set(rotated) == {1, 2}
+        for volume_id, (connectivity, coordinates) in rotated.items():
+            original_connectivity, original_coordinates = original[volume_id]
+            expected_coordinates = original_coordinates[:, coordinate_order] * signs
+            np.testing.assert_allclose(
+                canonical_triangles(connectivity, coordinates),
+                canonical_triangles(original_connectivity, expected_coordinates),
+                rtol=0.0,
+                atol=1e-10,
+            )
+            assert_closed_mesh(
+                connectivity,
+                coordinates,
+                touching_boxes["expected_volume_sizes"][volume_id],
+                600.0 if volume_id == 1 else 2400.0,
+            )
 
 
 @pytest.mark.parametrize("backend", ["h5py", "pymoab"])
@@ -2493,18 +2732,27 @@ def test_move_z(cube_geometry, tmp_path, backend):
 
 
 @pytest.mark.parametrize("backend", ["h5py", "pymoab"])
-def test_move_xyz(cube_geometry, tmp_path, backend):
-    """Moving a cube in all directions simultaneously."""
+def test_move_xyz(
+    touching_boxes, tmp_path, backend, canonical_triangles, assert_closed_mesh
+):
+    """Translation preserves every triangle and volume, including shared faces."""
+    from pathlib import Path
+
+    input_file = touching_boxes["filename"]
+    original_bytes = Path(input_file).read_bytes()
+    original_mesh = di.get_triangle_conn_and_coords_by_volume(
+        input_file, backend=backend
+    )
     output = str(tmp_path / "moved_xyz.h5m")
     di.move(
-        filename=cube_geometry["filename"],
+        filename=input_file,
         x=10.0,
         y=20.0,
         z=30.0,
         output=output,
         backend=backend,
     )
-    original_bbox = di.get_bounding_box(cube_geometry["filename"])
+    original_bbox = di.get_bounding_box(input_file)
     moved_bbox = di.get_bounding_box(output)
     assert moved_bbox.center[0] == pytest.approx(
         original_bbox.center[0] + 10.0, rel=1e-6
@@ -2515,6 +2763,26 @@ def test_move_xyz(cube_geometry, tmp_path, backend):
     assert moved_bbox.center[2] == pytest.approx(
         original_bbox.center[2] + 30.0, rel=1e-6
     )
+    assert Path(input_file).read_bytes() == original_bytes
+    for read_backend in ("h5py", "pymoab"):
+        moved = di.get_triangle_conn_and_coords_by_volume(output, backend=read_backend)
+        assert set(moved) == {1, 2}
+        for volume_id, (connectivity, coordinates) in moved.items():
+            original_connectivity, original_coordinates = original_mesh[volume_id]
+            np.testing.assert_allclose(
+                canonical_triangles(connectivity, coordinates),
+                canonical_triangles(
+                    original_connectivity, original_coordinates + [10.0, 20.0, 30.0]
+                ),
+                rtol=0.0,
+                atol=1e-10,
+            )
+            assert_closed_mesh(
+                connectivity,
+                coordinates,
+                touching_boxes["expected_volume_sizes"][volume_id],
+                600.0 if volume_id == 1 else 2400.0,
+            )
 
 
 @pytest.mark.parametrize("backend", ["h5py", "pymoab"])
@@ -2842,7 +3110,9 @@ def _read_name_tags(filename):
 
 
 @pytest.mark.parametrize("backend", ["h5py", "pymoab"])
-def test_set_boundary_condition_vacuum(touching_boxes, tmp_path, backend):
+def test_set_boundary_condition_vacuum(
+    touching_boxes, tmp_path, backend, boundary_group_members
+):
     """Setting a vacuum boundary condition creates a Group with the correct NAME."""
     output = str(tmp_path / f"bc_vacuum_{backend}.h5m")
     surface_ids = di.get_surface_ids(touching_boxes["filename"])
@@ -2853,6 +3123,10 @@ def test_set_boundary_condition_vacuum(touching_boxes, tmp_path, backend):
     )
     assert result == output
     assert "boundary:vacuum" in _read_name_tags(output)
+    assert boundary_group_members(output) == {
+        "boundary:vacuum": [("Surface", target_id)]
+    }
+    assert boundary_group_members(touching_boxes["filename"]) == {}
 
     # Geometry should still be intact
     assert di.get_surface_ids(output) == surface_ids
@@ -2860,7 +3134,9 @@ def test_set_boundary_condition_vacuum(touching_boxes, tmp_path, backend):
 
 
 @pytest.mark.parametrize("backend", ["h5py", "pymoab"])
-def test_set_boundary_condition_reflective(touching_boxes, tmp_path, backend):
+def test_set_boundary_condition_reflective(
+    touching_boxes, tmp_path, backend, boundary_group_members
+):
     """Setting a reflective boundary condition also works."""
     output = str(tmp_path / f"bc_reflect_{backend}.h5m")
     surface_ids = di.get_surface_ids(touching_boxes["filename"])
@@ -2873,6 +3149,30 @@ def test_set_boundary_condition_reflective(touching_boxes, tmp_path, backend):
         backend=backend,
     )
     assert "boundary:reflective" in _read_name_tags(output)
+    assert boundary_group_members(output) == {
+        "boundary:reflective": [("Surface", surface_ids[-1])]
+    }
+
+
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+def test_set_boundary_condition_preserves_other_surfaces(
+    touching_boxes, tmp_path, backend, boundary_group_members
+):
+    output = str(tmp_path / "boundaries.h5m")
+    surface_ids = di.get_surface_ids(touching_boxes["filename"], backend=backend)
+    di.set_boundary_condition(
+        touching_boxes["filename"], surface_ids[0], "vacuum", output, backend=backend
+    )
+    di.set_boundary_condition(output, surface_ids[-1], "reflective", backend=backend)
+    di.set_boundary_condition(output, surface_ids[1], "vacuum", backend=backend)
+
+    assert boundary_group_members(output) == {
+        "boundary:vacuum": [("Surface", surface_ids[0]), ("Surface", surface_ids[1])],
+        "boundary:reflective": [("Surface", surface_ids[-1])],
+    }
+    assert di.get_volumes_by_cell_id(output, backend=backend) == pytest.approx(
+        touching_boxes["expected_volume_sizes"], rel=1e-10, abs=1e-9
+    )
 
 
 @pytest.mark.parametrize("backend", ["h5py", "pymoab"])
@@ -2895,7 +3195,9 @@ def test_set_boundary_condition_file_not_found(backend):
 
 
 @pytest.mark.parametrize("backend", ["h5py", "pymoab"])
-def test_set_boundary_condition_in_place(touching_boxes, tmp_path, backend):
+def test_set_boundary_condition_in_place(
+    touching_boxes, tmp_path, backend, boundary_group_members
+):
     """Passing output_filename=None modifies the file in place."""
     import shutil
 
@@ -2906,6 +3208,9 @@ def test_set_boundary_condition_in_place(touching_boxes, tmp_path, backend):
     di.set_boundary_condition(copy_path, surface_ids[0], "vacuum", backend=backend)
 
     assert "boundary:vacuum" in _read_name_tags(copy_path)
+    assert boundary_group_members(copy_path) == {
+        "boundary:vacuum": [("Surface", surface_ids[0])]
+    }
 
 
 # ============================================================================

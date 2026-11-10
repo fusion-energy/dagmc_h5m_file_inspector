@@ -74,21 +74,25 @@ def test_dagmc_file_loads_once_for_multiple_queries(separated_boxes):
     assert load_mock.call_count == 1
 
 
-def test_dagmc_file_returns_triangle_data_copies(cube_geometry):
-    model = di.DAGMCFile(cube_geometry["filename"])
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+def test_dagmc_file_returns_triangle_data_copies(cube_geometry, backend):
+    model = di.DAGMCFile(cube_geometry["filename"], backend=backend)
 
     first = model.get_triangle_conn_and_coords_by_volume()
+    expected_connectivity = first[1][0].copy()
+    expected_coordinates = first[1][1].copy()
     first[1][0][0, 0] = -999
     first[1][1][0, 0] = -999.0
     second = model.get_triangle_conn_and_coords_by_volume()
 
-    assert second[1][0][0, 0] != -999
-    assert second[1][1][0, 0] != -999.0
+    np.testing.assert_array_equal(second[1][0], expected_connectivity)
+    np.testing.assert_array_equal(second[1][1], expected_coordinates)
 
 
 @pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+@pytest.mark.parametrize("read_backend", ["h5py", "pymoab"])
 def test_dagmc_file_mutates_in_memory_and_writes_once(
-    touching_boxes, cube_geometry, backend, tmp_path
+    touching_boxes, cube_geometry, backend, read_backend, tmp_path, assert_closed_mesh
 ):
     combined = str(tmp_path / "combined.h5m")
     output = str(tmp_path / f"modified_{backend}.h5m")
@@ -110,13 +114,26 @@ def test_dagmc_file_mutates_in_memory_and_writes_once(
         assert model.get_volumes_and_materials() == {3: "cube"}
         bounding_box = model.get_bounding_box()
         assert bounding_box.center == pytest.approx((0.0, 10.0, 0.0))
+        assert bounding_box.lower_left == pytest.approx((-5.0, 5.0, -5.0))
+        assert bounding_box.upper_right == pytest.approx((5.0, 15.0, 5.0))
+        connectivity, coordinates = model.get_triangle_conn_and_coords_by_volume()[3]
+        assert_closed_mesh(connectivity, coordinates, 1000.0, 600.0)
         assert not (tmp_path / f"modified_{backend}.h5m").exists()
         assert model.write(output) == output
 
     assert load_mock.call_count == 1
-    assert di.get_volumes_and_materials(output, backend="h5py") == {3: "cube"}
-    written_box = di.get_bounding_box(output)
+    assert di.get_volumes_and_materials(output, backend=read_backend) == {3: "cube"}
+    assert di.get_volumes_by_cell_id(output, backend=read_backend) == pytest.approx(
+        {3: 1000.0}, rel=1e-10, abs=1e-9
+    )
+    connectivity, coordinates = di.get_triangle_conn_and_coords_by_volume(
+        output, backend=read_backend
+    )[3]
+    assert_closed_mesh(connectivity, coordinates, 1000.0, 600.0)
+    written_box = di.get_bounding_box(output, backend=read_backend)
     assert written_box.center == pytest.approx((0.0, 10.0, 0.0))
+    assert written_box.lower_left == pytest.approx((-5.0, 5.0, -5.0))
+    assert written_box.upper_right == pytest.approx((5.0, 15.0, 5.0))
 
 
 def test_dagmc_file_mutation_errors_leave_data_unchanged(separated_boxes):
