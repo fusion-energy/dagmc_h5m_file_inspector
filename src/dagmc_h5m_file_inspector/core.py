@@ -214,6 +214,8 @@ class BoundingBox:
     def __setitem__(self, key: int, val: object) -> None:
         """Set lower_left (0) or upper_right (1) by index."""
         val = tuple(float(v) for v in val)
+        if len(val) != 3:
+            raise ValueError(f"corner must have length 3, got {len(val)}")
         if key == 0:
             self._lower_left = val
         elif key == 1:
