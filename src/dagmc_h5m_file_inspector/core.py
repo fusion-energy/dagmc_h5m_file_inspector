@@ -1319,7 +1319,7 @@ def _get_volume_ids_from_pymoab(mbcore: object) -> List[int]:
 def _get_triangle_conn_and_coords_from_h5py(
     f: h5py.File, cache: Optional["_H5pyReadCache"] = None
 ) -> Dict[int, Tuple[np.ndarray, np.ndarray]]:
-    """Get per-volume triangle data from an open h5py file."""
+    """Get outward-oriented per-volume triangles from an open h5py file."""
     coords, node_start = _read_nodes_h5py(f)
     tri_conn, tri_start = _read_tri3_connectivity_h5py(f)
     tri_conn0 = tri_conn - node_start  # Convert to 0-based indexing
@@ -1330,6 +1330,7 @@ def _get_triangle_conn_and_coords_from_h5py(
 
     categories = cache.tag("CATEGORY")
     geom_dim = cache.tag("GEOM_DIMENSION")
+    geom_sense = _read_geom_sense_h5py(f)
     global_ids = cache.set_global_ids
 
     # Build set of surface handles
@@ -1358,8 +1359,8 @@ def _get_triangle_conn_and_coords_from_h5py(
             # Fallback: find surfaces that reference this volume
             surfaces = list(surface_handles)
 
-        # Collect all triangle indices for this volume
-        all_tri_indices: List[int] = []
+        # Collect all triangles for this volume
+        all_triangles: List[np.ndarray] = []
         for surf_handle in surfaces:
             surf_set = sets_by_handle.get(surf_handle)
             if surf_set is None:
@@ -1370,9 +1371,14 @@ def _get_triangle_conn_and_coords_from_h5py(
                 tri_start=tri_start,
                 tri_end=tri_end,
             )
-            all_tri_indices.extend(tri_indices.tolist())
+            if tri_indices.size == 0:
+                continue
+            surface_tris = tri_conn0[tri_indices]
+            if _surface_sign_for_volume(vol_handle, geom_sense.get(surf_handle)) < 0:
+                surface_tris = surface_tris[:, ::-1]
+            all_triangles.append(surface_tris)
 
-        if not all_tri_indices:
+        if not all_triangles:
             # Empty volume
             result[int(vol_gid)] = (
                 np.array([], dtype=np.int64).reshape(0, 3),
@@ -1380,10 +1386,8 @@ def _get_triangle_conn_and_coords_from_h5py(
             )
             continue
 
-        all_tri_indices_array = np.array(all_tri_indices, dtype=np.int64)
-
         # Get the triangles for this volume
-        volume_tris = tri_conn0[all_tri_indices_array]
+        volume_tris = np.concatenate(all_triangles, axis=0)
 
         # Find unique vertex indices and create local indexing
         unique_verts = np.unique(volume_tris)
@@ -1774,11 +1778,15 @@ def _get_triangle_conn_and_coords_pymoab(
 def _get_triangle_conn_and_coords_from_pymoab(
     mbcore: object,
 ) -> Dict[int, Tuple[np.ndarray, np.ndarray]]:
-    """Get per-volume triangle data from a loaded pymoab Core object."""
+    """Get outward-oriented per-volume triangles from a loaded pymoab Core."""
     import pymoab as mb
 
     category_tag = mbcore.tag_get_handle(mb.types.CATEGORY_TAG_NAME)
     id_tag = mbcore.tag_get_handle(mb.types.GLOBAL_ID_TAG_NAME)
+    try:
+        geom_sense_tag = mbcore.tag_get_handle("GEOM_SENSE_2")
+    except RuntimeError:
+        geom_sense_tag = None
 
     # Get all volumes
     volume_ents = mbcore.get_entities_by_type_and_tag(
@@ -1798,9 +1806,18 @@ def _get_triangle_conn_and_coords_from_pymoab(
         all_tris_conn = []
 
         for surf in surfaces:
+            sense = None
+            if geom_sense_tag is not None:
+                try:
+                    sense = tuple(mbcore.tag_get_data(geom_sense_tag, surf)[0])
+                except RuntimeError:
+                    pass
+            reverse_winding = _surface_sign_for_volume(vol_ent, sense) < 0
             tris = mbcore.get_entities_by_type(surf, mb.types.MBTRI)
             for tri in tris:
                 conn = mbcore.get_connectivity(tri)
+                if reverse_winding:
+                    conn = conn[::-1]
                 all_verts.update(conn)
                 all_tris_conn.append(list(conn))
 
