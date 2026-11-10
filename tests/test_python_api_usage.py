@@ -248,6 +248,59 @@ def test_fail_with_missing_input_files(backend):
         )
 
 
+def test_bounding_box_set_operations():
+    first = di.BoundingBox((-1, -2, -3), (4, 5, 6))
+    second = di.BoundingBox((2, -4, -1), (7, 3, 8))
+    original = tuple(first)
+    intersection = first & second
+    union = first | second
+    assert tuple(intersection) == ((2, -2, -1), (4, 3, 6))
+    assert tuple(union) == ((-1, -4, -3), (7, 5, 8))
+    assert tuple(first) == original
+    assert (4, 5, 6) in first
+    assert (4, 5, 7) not in first
+    assert intersection in first
+    assert second not in first
+    assert tuple(di.BoundingBox.infinite() & first) == original
+
+    alias = first
+    first &= second
+    assert first is alias
+    assert tuple(first) == tuple(intersection)
+    first = di.BoundingBox(*original)
+    alias = first
+    first |= second
+    assert first is alias
+    assert tuple(first) == tuple(union)
+
+
+def test_bounding_box_expansion_and_assignment():
+    box = di.BoundingBox((-1, -2, -3), (4, 5, 6))
+    expanded = box.expand((1, 2, 3))
+    assert tuple(expanded) == ((-2, -4, -6), (5, 7, 9))
+    assert tuple(box) == ((-1, -2, -3), (4, 5, 6))
+    assert box.expand(1, inplace=True) is box
+    assert tuple(box) == ((-2, -3, -4), (5, 6, 7))
+
+    box[0] = (0, 0, 0)
+    box[1] = (4, 5, 6)
+    assert box.center == (2, 2.5, 3)
+    assert box.width == (4, 5, 6)
+    assert box.volume == 120
+    with pytest.raises(IndexError):
+        box[2] = (0, 0, 0)
+
+
+@pytest.mark.parametrize("corner", [0, 1])
+@pytest.mark.parametrize("coordinates", [[], [1, 2], [1, 2, 3, 4]])
+def test_bounding_box_rejects_invalid_corner_assignment(corner, coordinates):
+    box = di.BoundingBox((-1, -2, -3), (4, 5, 6))
+    original = tuple(box)
+    with pytest.raises(ValueError, match="length 3"):
+        box[corner] = coordinates
+    assert tuple(box) == original
+
+
 @pytest.mark.parametrize("backend", ["h5py", "pymoab"])
 def test_bounding_box(touching_boxes, backend):
     """Extracts the bounding box from a dagmc file and checks it matches
