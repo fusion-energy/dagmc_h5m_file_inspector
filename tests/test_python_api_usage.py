@@ -1337,33 +1337,98 @@ def test_convert_h5m_to_vtkhdf_file_not_found():
 
 
 @pytest.mark.parametrize("backend", ["h5py", "pymoab"])
-def test_remove_single_material(touching_boxes, backend, tmp_path):
-    """Remove one material from touching geometry, verify the other remains."""
+@pytest.mark.parametrize("read_backend", ["h5py", "pymoab"])
+@pytest.mark.parametrize(
+    ("removed_material", "retained_material", "retained_volume_id"),
+    [("small_box", "big_box", 2), ("big_box", "small_box", 1)],
+)
+def test_remove_single_material(
+    touching_boxes,
+    backend,
+    read_backend,
+    removed_material,
+    retained_material,
+    retained_volume_id,
+    tmp_path,
+):
+    """Removing either touching solid preserves the other's enclosed volume."""
     input_file = touching_boxes["filename"]
 
     # Check materials and volumes before removal
-    mats_before = di.get_materials(input_file, backend="pymoab")
-    vols_before = di.get_volumes(input_file, backend="pymoab")
+    mats_before = di.get_materials(input_file, backend=read_backend)
+    vols_before = di.get_volumes(input_file, backend=read_backend)
     assert "small_box" in mats_before
     assert "big_box" in mats_before
+
+    sizes_before = di.get_volumes_by_material_name(input_file, backend=read_backend)
+    expected_size = touching_boxes["expected_volume_sizes"][retained_volume_id]
+    assert sizes_before[retained_material] == pytest.approx(
+        expected_size, rel=0.0, abs=1e-9
+    )
 
     output = str(tmp_path / f"removed_{backend}.h5m")
     removed = di.remove_materials(
         input_filename=input_file,
         output_filename=output,
-        materials_to_remove="small_box",
+        materials_to_remove=removed_material,
         backend=backend,
     )
-    assert removed == ["small_box"]
+    assert removed == [removed_material]
 
-    mats_after = di.get_materials(output, backend="pymoab")
-    assert mats_after == ["big_box"]
+    mats_after = di.get_materials(output, backend=read_backend)
+    assert mats_after == [retained_material]
 
-    vols_after = di.get_volumes(output, backend="pymoab")
+    vols_after = di.get_volumes(output, backend=read_backend)
     assert len(vols_after) == 1
+
+    sizes_after = di.get_volumes_by_material_name(output, backend=read_backend)
+    assert sizes_after == pytest.approx(
+        {retained_material: sizes_before[retained_material]}, rel=0.0, abs=1e-9
+    )
 
     assert len(mats_after) < len(mats_before)
     assert len(vols_after) < len(vols_before)
+
+
+@pytest.mark.parametrize("backend", ["h5py", "pymoab"])
+@pytest.mark.parametrize("read_backend", ["h5py", "pymoab"])
+@pytest.mark.parametrize(
+    ("removed_material", "retained_material"),
+    [("left", "right"), ("right", "left")],
+)
+def test_remove_material_preserves_touching_cube_volume(
+    backend, read_backend, removed_material, retained_material, tmp_path
+):
+    """Issue #63: removing either adjacent cube preserves its neighbor's volume."""
+    import cadquery as cq
+    from cad_to_dagmc import CadToDagmc
+
+    input_file = str(tmp_path / "two_cubes.h5m")
+    output_file = str(tmp_path / "retained_cube.h5m")
+    left_cube = cq.Workplane().box(10, 10, 10).val()
+    right_cube = cq.Workplane().box(10, 10, 10).translate((10, 0, 0)).val()
+    model = CadToDagmc()
+    model.add_cadquery_object(left_cube, material_tags=["left"])
+    model.add_cadquery_object(right_cube, material_tags=["right"])
+    model.export_dagmc_h5m_file(input_file, min_mesh_size=2.0, max_mesh_size=2.0)
+
+    volumes_before = di.get_volumes_by_material_name(input_file, backend=read_backend)
+    assert volumes_before == pytest.approx(
+        {"left": 1000.0, "right": 1000.0}, rel=0.0, abs=1e-9
+    )
+
+    removed = di.remove_materials(
+        input_filename=input_file,
+        output_filename=output_file,
+        materials_to_remove=[removed_material],
+        backend=backend,
+    )
+    assert removed == [removed_material]
+
+    volumes_after = di.get_volumes_by_material_name(output_file, backend=read_backend)
+    assert volumes_after == pytest.approx(
+        {retained_material: volumes_before[retained_material]}, rel=0.0, abs=1e-9
+    )
 
 
 @pytest.mark.parametrize("backend", ["h5py", "pymoab"])
